@@ -25,6 +25,15 @@ add_executable(GPMPFilter
 set(GTSAM_LIBS
     /usr/local/lib/libgtsam.so
     /usr/local/lib/libgtsam_unstable.so
+    /usr/local/lib/libmetis-gtsam.so
 )
 
 target_link_libraries(GPMPFilter ${GTSAM_LIBS})
+
+# 设置 RPATH 以便运行时能找到 GTSAM 库
+set_target_properties(GPMPFilter PROPERTIES
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH /usr/local/lib
+    BUILD_RPATH /usr/local/lib
+)

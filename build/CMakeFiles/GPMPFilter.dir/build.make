@@ -94,6 +94,7 @@ GPMPFilter: CMakeFiles/GPMPFilter.dir/src/main.cpp.o
 GPMPFilter: CMakeFiles/GPMPFilter.dir/build.make
 GPMPFilter: /usr/local/lib/libgtsam.so
 GPMPFilter: /usr/local/lib/libgtsam_unstable.so
+GPMPFilter: /usr/local/lib/libmetis-gtsam.so
 GPMPFilter: CMakeFiles/GPMPFilter.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/chen/Documents/GPMPFilter/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable GPMPFilter"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/GPMPFilter.dir/link.txt --verbose=$(VERBOSE)

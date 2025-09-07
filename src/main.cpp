@@ -26,13 +26,25 @@ std::vector<gtsam::Vector4> loadCSV(const std::string& filename) {
     std::string line;
     while (std::getline(file, line)) {
         std::istringstream iss(line);
-        double value;
-        if (iss >> value) {
+        double x, y;
+        char comma; // 用于处理CSV中的逗号
+        
+        // 尝试读取x,y格式的数据
+        if (iss >> x >> comma >> y) {
             // 将位置数据转换为Vector4格式 [x, y, vx, vy]
-            // 由于数据只有一维，我们将其作为x坐标，y设为0
             gtsam::Vector4 state;
-            state << value, 0.0, 0.0, 0.0; // 初始速度设为0
+            state << x, y, 0.0, 0.0; // 初始速度设为0
             measurements.push_back(state);
+        }
+        // 如果失败，尝试读取只有x的数据（向后兼容）
+        else {
+            iss.clear(); // 清除错误状态
+            iss.seekg(0); // 回到行首
+            if (iss >> x) {
+                gtsam::Vector4 state;
+                state << x, 0.0, 0.0, 0.0; // y坐标设为0
+                measurements.push_back(state);
+            }
         }
     }
     
@@ -56,7 +68,7 @@ void saveTrajectory(const gtsam::Values& result, const std::string& filename) {
         gtsam::Key key = key_value.key;
         // 直接使用整数键值，因为我们使用的是整数索引
         gtsam::Vector4 state = result.at<gtsam::Vector4>(key);
-        file << state[0] << std::endl; // 只保存x坐标
+        file << state[0] << "," << state[1] << std::endl; // 保存x,y坐标
     }
     
     file.close();
