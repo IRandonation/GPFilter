@@ -28,17 +28,17 @@ GPMPFilter/
 │   ├── VelocityConstraint.h # 速度约束因子定义
 │   ├── AccelerationConstraint.h # 加速度约束因子定义
 │   ├── GPInterpolator.h   # GP插值器定义
-│   └── TimeParameterization.h # 时间参数化器定义
+│   
 ├── src/                   # C++源代码目录
 │   ├── main.cpp           # 主程序实现
 │   ├── GPInterpolator.cpp # GP插值器实现
-│   └── TimeParameterization.cpp # 时间参数化器实现
+│   
 ├── data/                  # 数据文件目录
 │   ├── trajectory.csv     # 原始轨迹数据
 │   └── trajectory_2d.csv  # 2D原始轨迹数据
 ├── output/                # 输出文件目录
 │   ├── smoothed_trajectory.csv # 滤波后的轨迹数据
-│   └── time_parameterized_trajectory.csv # 时间参数化后的轨迹数据
+│   
 └── build/                 # 构建目录
 ```
 
@@ -104,6 +104,112 @@ GPMPFilter/
   - 最大加速度限制（maxAcceleration）
   - 默认时间步长（defaultDt）
 - **输出**：带时间戳的轨迹状态，包含位置和速度信息
+
+## 速度和加速度的计算方法
+
+### 速度计算
+
+在GPMPFilter系统中，速度是通过以下方式计算和得到的：
+
+1. **状态向量表示**：
+   - 每个状态点使用4维向量表示：`[x, y, vx, vy]`
+   - 其中`vx`和`vy`分别是x和y方向的速度分量
+
+2. **速度大小计算**：
+   - 速度大小通过欧几里得范数计算：`velocity = sqrt(vx² + vy²)`
+   - 在[`main.cpp`](src/main.cpp:115)中的实现：
+     ```cpp
+     double velocity = std::sqrt(vx * vx + vy * vy);
+     ```
+
+3. **速度约束**：
+   - 通过[`VelocityConstraint`](include/VelocityConstraint.h:1)类限制最大速度
+   - 当速度超过阈值时，在优化过程中施加惩罚
+   - 默认最大速度限制为5.0 m/s
+
+4. **速度优化**：
+   - 速度作为状态向量的一部分，通过因子图优化得到
+   - GP过程因子确保相邻状态点之间的速度变化平滑
+   - 测量因子间接影响速度估计，确保轨迹符合观测数据
+
+### 加速度计算
+
+加速度是通过以下方式计算和得到的：
+
+1. **数值微分方法**：
+   - 使用中心差分法计算加速度：`a = (v₂ - v₁) / (2 * dt)`
+   - 在[`main.cpp`](src/main.cpp:117-126)中的实现：
+     ```cpp
+     // 计算加速度（使用中心差分法）
+     double acceleration = 0.0;
+     if (i > 0 && i < trajectory.size() - 1) {
+         const auto& prevState = trajectory[i-1];
+         const auto& nextState = trajectory[i+1];
+         
+         double ax = (nextState[2] - prevState[2]) / (2 * dt);
+         double ay = (nextState[3] - prevState[3]) / (2 * dt);
+         acceleration = std::sqrt(ax * ax + ay * ay);
+     }
+     ```
+
+2. **加速度约束**：
+   - 通过[`AccelerationConstraint`](include/AccelerationConstraint.h:1)类限制最大加速度
+   - 加速度约束作用于相邻状态点之间：`a = (v₂ - v₁) / dt`
+   - 当加速度超过阈值时，在优化过程中施加惩罚
+   - 默认最大加速度限制为2.0 m/s²
+
+3. **加速度在GP插值中的处理**：
+   - 在[`GPInterpolator.cpp`](src/GPInterpolator.cpp:129-169)中，插值过程中会考虑加速度限制
+   - 如果估计的加速度超过限制，使用更保守的插值方法：
+     ```cpp
+     // 估计加速度：基于速度变化和时间
+     gtsam::Vector2 accel_estimate = (velocity2 - velocity1) / dt;
+     double accel_magnitude = accel_estimate.norm();
+     
+     // 如果估计的加速度超过限制，则使用更保守的插值方法
+     if (accel_magnitude > max_acceleration) {
+         // 使用更平滑的插值方法：限制速度变化率
+         double max_velocity_change = max_acceleration * interpolated_dt;
+         // ... 限制速度变化的代码
+     }
+     ```
+
+4. **自适应时间步长**：
+   - 系统使用自适应时间步长来确保速度和加速度约束得到满足
+   - 在[`main.cpp`](src/main.cpp:162-193)中计算自适应时间步长：
+     ```cpp
+     // 基于加速度约束计算最小时间
+     double timeFromAcceleration = deltaVelMagnitude / maxAcceleration;
+     
+     // 基于速度约束计算最小时间
+     double avgSpeed = (vel1.norm() + vel2.norm()) / 2.0;
+     double timeFromDistance = distance / std::max(avgSpeed, 0.1);
+     
+     // 取两者中的较大值，确保同时满足速度和加速度约束
+     double minTime = std::max(timeFromAcceleration, timeFromDistance);
+     double adaptiveDt = std::max(minTime, minDt);
+     ```
+
+### 计算流程总结
+
+1. **初始化阶段**：
+   - 从CSV文件加载位置数据，初始速度设为0
+   - 设置速度和加速度约束参数
+
+2. **优化阶段**：
+   - 使用因子图优化同时估计位置和速度
+   - GP过程因子确保速度变化的平滑性
+   - 速度和加速度约束因子确保运动学可行性
+
+3. **插值阶段**：
+   - 使用高斯过程回归进行插值
+   - 在插值过程中考虑加速度限制，确保插值轨迹的平滑性
+
+4. **输出阶段**：
+   - 计算并保存每个点的速度和加速度信息
+   - 输出统计信息，包括最大/平均速度和加速度
+
+这种计算方法确保了生成的轨迹不仅在位置上平滑，而且在速度和加速度上也符合物理规律，适用于实际机器人运动控制等应用场景。
 
 ## 主要算法流程
 

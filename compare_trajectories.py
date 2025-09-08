@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Trajectory Data Comparison Tool
-Used to compare original trajectory data with filtered trajectory data
+用于对比原始轨迹数据与滤波、插值轨迹数据
 """
 
 import numpy as np
@@ -15,95 +15,74 @@ import sys
 
 
 class TrajectoryComparator:
-    """Trajectory Data Comparator"""
+    """轨迹数据对比器"""
     
     def __init__(self):
         self.original_data = None
         self.smoothed_data = None
-        self.original_2d_data = None
         self.interpolated_data = None
-        self.gp_interpolation_data = None
-        self.time_parameterized_data = None
-        self.gp_time_parameterized_data = None
         
-    def load_data(self, original_file, smoothed_file,
-                  interpolated_file=None, gp_interpolation_file=None, time_parameterized_file=None,
-                  gp_time_parameterized_file=None):
-        """Load data files"""
+    def load_data(self, original_file, smoothed_file, interpolated_file):
+        """加载数据文件并正确映射列名"""
         try:
-            # Load original 4D trajectory data
+            # 加载原始轨迹数据 (x, y)
             self.original_data = pd.read_csv(original_file, header=None,
-                                           names=['x', 'y', 'z', 'param'])
-            print(f"Successfully loaded original data: {original_file}")
-            print(f"Data points: {len(self.original_data)}")
+                                           names=['x', 'y'])
+            self.original_data = self.original_data.apply(pd.to_numeric, errors='coerce')
+            print(f"成功加载原始数据: {original_file}")
+            print(f"数据点数量: {len(self.original_data)}")
             
-            # Load filtered trajectory data
+            # 加载滤波轨迹数据 (x, y)
             self.smoothed_data = pd.read_csv(smoothed_file, header=None,
                                            names=['x_smooth', 'y_smooth'])
-            print(f"Successfully loaded filtered data: {smoothed_file}")
-            print(f"Data points: {len(self.smoothed_data)}")
+            self.smoothed_data = self.smoothed_data.apply(pd.to_numeric, errors='coerce')
+            print(f"成功加载滤波数据: {smoothed_file}")
+            print(f"数据点数量: {len(self.smoothed_data)}")
             
-            # Load additional data files
-            additional_files = {
-                'interpolated_data': (interpolated_file, ['x_interp', 'y_interp'], None),
-                'gp_interpolation_data': (gp_interpolation_file, ['x_gp', 'y_gp', 'vx_gp', 'vy_gp', 'acceleration_gp'],
-                                         lambda df: df.assign(velocity_gp=np.sqrt(df['vx_gp']**2 + df['vy_gp']**2))),
-                'time_parameterized_data': (time_parameterized_file, ['timestamp', 'x_time', 'y_time', 'vx_time', 'vy_time'],
-                                           lambda df: (print(f"Total time: {df['timestamp'].iloc[-1]:.3f} seconds"), df)[1]),
-                'gp_time_parameterized_data': (gp_time_parameterized_file, ['time', 'x', 'y', 'vx', 'vy'],
-                                              self._process_gp_time_parameterized_data)
-            }
-            
-            for attr_name, (file_path, columns, processor) in additional_files.items():
-                if file_path:
-                    data = pd.read_csv(file_path, header=None, names=columns)
-                    print(f"Successfully loaded {attr_name}: {file_path}")
-                    print(f"Data points: {len(data)}")
-                    if processor:
-                        data = processor(data)
-                    setattr(self, attr_name, data)
+            # 加载插值轨迹数据（带时间戳、速度和加速度）
+            if interpolated_file:
+                self.interpolated_data = pd.read_csv(interpolated_file)
+                self.interpolated_data = self.interpolated_data.apply(pd.to_numeric, errors='coerce')
+                print(f"成功加载插值数据: {interpolated_file}")
+                print(f"数据点数量: {len(self.interpolated_data)}")
+                print(f"时间范围: {self.interpolated_data['timestamp'].min():.3f} 到 {self.interpolated_data['timestamp'].max():.3f} 秒")
             
             return True
             
         except Exception as e:
-            print(f"Failed to load data: {e}")
+            print(f"加载数据失败: {e}")
             return False
     
-    def _process_gp_time_parameterized_data(self, df):
-        """Process GP time parameterized data to calculate velocity and acceleration"""
-        # Calculate velocity magnitude
-        df['velocity'] = np.sqrt(df['vx']**2 + df['vy']**2)
-        
-        # Calculate acceleration
-        if len(df) >= 3:
-            dt = np.diff(df['time'])
-            avg_dt = np.mean(dt)
-            ax = np.gradient(df['vx'], avg_dt)
-            ay = np.gradient(df['vy'], avg_dt)
-            df['acceleration'] = np.sqrt(ax**2 + ay**2)
-        else:
-            df['acceleration'] = 0.0
-        
-        print(f"Total time: {df['time'].iloc[-1]:.3f} seconds")
-        return df
-    
     def calculate_statistics(self):
-        """Calculate statistics"""
+        """计算原始轨迹与滤波轨迹之间的统计信息"""
         if self.original_data is None or self.smoothed_data is None:
-            print("Error: Please load data first")
+            print("错误: 请先加载数据")
             return None
             
-        # Ensure data length consistency
-        min_length = min(len(self.original_data), len(self.smoothed_data))
-        orig_x = self.original_data['x'].values[:min_length]
-        orig_y = self.original_data['y'].values[:min_length]
-        smooth_x = self.smoothed_data['x_smooth'].values[:min_length]
-        smooth_y = self.smoothed_data['y_smooth'].values[:min_length]
+        # 清除NaN值
+        orig_clean = self.original_data.dropna()
+        smooth_clean = self.smoothed_data.dropna()
         
-        # Calculate errors
+        # 确保数据长度一致
+        min_length = min(len(orig_clean), len(smooth_clean))
+        orig_x = orig_clean['x'].values[:min_length]
+        orig_y = orig_clean['y'].values[:min_length]
+        smooth_x = smooth_clean['x_smooth'].values[:min_length]
+        smooth_y = smooth_clean['y_smooth'].values[:min_length]
+        
+        # 计算误差
         error_x = orig_x - smooth_x
         error_y = orig_y - smooth_y
         error_magnitude = np.sqrt(error_x**2 + error_y**2)
+        
+        # 移除误差中的NaN值
+        error_x = error_x[~np.isnan(error_x)]
+        error_y = error_y[~np.isnan(error_y)]
+        error_magnitude = error_magnitude[~np.isnan(error_magnitude)]
+        
+        if len(error_magnitude) == 0:
+            print("警告: 没有有效的数据点用于误差计算")
+            return None
         
         stats = {
             'x_error_mean': np.mean(error_x),
@@ -119,7 +98,7 @@ class TrajectoryComparator:
         return stats
     
     def print_statistics(self, stats):
-        """Print statistics"""
+        """以英文表格形式打印统计信息"""
         if stats is None:
             return
             
@@ -131,281 +110,176 @@ class TrajectoryComparator:
         print(f"Min Error: {stats['min_error']:.6f}")
     
     def plot_comparison(self, save_path=None):
-        """Plot comparison"""
+        """生成所有需要的对比图表"""
         if self.original_data is None or self.smoothed_data is None:
-            print("Error: Please load data first")
+            print("错误: 请先加载数据")
             return
             
-        # Determine if we have time parameterized data and GP interpolation data
-        has_time_data = self.time_parameterized_data is not None
-        has_gp_data = self.gp_interpolation_data is not None
-        has_gp_time_data = self.gp_time_parameterized_data is not None
+        # 检查是否有插值数据
+        has_interpolated_data = self.interpolated_data is not None
         
-        # Create subplots - larger figure if we have time data or GP data
-        if has_time_data or has_gp_data or has_gp_time_data:
-            fig, axes = plt.subplots(4, 2, figsize=(15, 24))
-        else:
-            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        # 创建图形和子图
+        fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+        fig.suptitle('trajectory compare', fontsize=16)
         
-        # Ensure data length consistency
-        min_length = min(len(self.original_data), len(self.smoothed_data))
+        # 清除NaN值
+        orig_clean = self.original_data.dropna()
+        smooth_clean = self.smoothed_data.dropna()
         
-        # 1. Trajectory comparison plot
+        # 确保数据长度一致
+        min_length = min(len(orig_clean), len(smooth_clean))
+        
+        # 1. 原轨迹与滤波轨迹对比
         ax1 = axes[0, 0]
-        ax1.plot(self.original_data['x'][:min_length],
-                self.original_data['y'][:min_length],
-                'b-', label='Original Trajectory', alpha=0.7, linewidth=2)
-        ax1.plot(self.smoothed_data['x_smooth'][:min_length],
-                self.smoothed_data['y_smooth'][:min_length],
-                'r-', label='Filtered Trajectory', alpha=0.7, linewidth=2)
+        ax1.plot(orig_clean['x'][:min_length],
+                orig_clean['y'][:min_length],
+                'b-', label='Original', alpha=0.7, linewidth=2)
+        ax1.plot(smooth_clean['x_smooth'][:min_length],
+                smooth_clean['y_smooth'][:min_length],
+                'r-', label='Smoothed', alpha=0.7, linewidth=2)
         
-        # If interpolated data is available, plot it as well
-        if self.interpolated_data is not None:
-            min_length_interp = min(min_length, len(self.interpolated_data))
-            ax1.plot(self.interpolated_data['x_interp'][:min_length_interp],
-                    self.interpolated_data['y_interp'][:min_length_interp],
-                    'g--', label='Interpolated Trajectory', alpha=0.5)
+        # 添加标记点以便更清晰地看到对应关系
+        ax1.scatter(orig_clean['x'][:min_length], orig_clean['y'][:min_length], 
+                   c='blue', s=30, alpha=0.5)
+        ax1.scatter(smooth_clean['x_smooth'][:min_length], smooth_clean['y_smooth'][:min_length], 
+                   c='red', s=30, alpha=0.5)
         
-        # If GP interpolation data is available, plot it as well
-        if has_gp_data:
-            ax1.plot(self.gp_interpolation_data['x_gp'],
-                    self.gp_interpolation_data['y_gp'],
-                    'c-.', label='GP Interpolation Trajectory', alpha=0.7)
-        
-        # If time parameterized data is available, plot it as well
-        if has_time_data:
-            ax1.plot(self.time_parameterized_data['x_time'],
-                    self.time_parameterized_data['y_time'],
-                    'm:', label='Time Parameterized Trajectory', alpha=0.7)
-        
-        # If GP time parameterized data is available, plot it as well
-        if has_gp_time_data:
-            ax1.plot(self.gp_time_parameterized_data['x'],
-                    self.gp_time_parameterized_data['y'],
-                    'r--', label='GP Time Parameterized Trajectory', alpha=0.7, linewidth=2)
-        
-        # If 2D original data is available, plot it as well
-        if self.original_2d_data is not None:
-            min_length_2d = min(min_length, len(self.original_2d_data))
-            ax1.plot(self.original_2d_data['x_2d'][:min_length_2d],
-                    self.original_2d_data['y_2d'][:min_length_2d],
-                    'y-', label='2D Original Trajectory', alpha=0.5)
-        
-        ax1.set_xlabel('X Coordinate')
-        ax1.set_ylabel('Y Coordinate')
-        ax1.set_title('Trajectory Comparison')
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_title('Original vs Smoothed Trajectory')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
         
-        # 2. X coordinate comparison
+        # 2. 滤波轨迹与插值轨迹对比（如果有插值数据）
         ax2 = axes[0, 1]
-        time_steps = np.arange(min_length)
-        ax2.plot(time_steps, self.original_data['x'][:min_length],
-                'b-', label='Original X', alpha=0.7)
-        ax2.plot(time_steps, self.smoothed_data['x_smooth'][:min_length],
-                'r-', label='Filtered X', alpha=0.7)
+        if has_interpolated_data:
+            interp_clean = self.interpolated_data.dropna()
+            
+            ax2.plot(smooth_clean['x_smooth'][:min_length],
+                    smooth_clean['y_smooth'][:min_length],
+                    'r-', label='Smoothed', alpha=0.7, linewidth=2)
+            ax2.scatter(smooth_clean['x_smooth'][:min_length], 
+                       smooth_clean['y_smooth'][:min_length], 
+                       c='red', s=30, alpha=0.5)
+            
+            # 绘制插值轨迹
+            ax2.plot(interp_clean['x'],
+                    interp_clean['y'],
+                    'g--', label='GP Interpolated', alpha=0.7, linewidth=1.5)
+            
+            ax2.set_xlabel('X')
+            ax2.set_ylabel('Y')
+            ax2.set_title('Smoothed vs GP Interpolated Trajectory')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+        else:
+            ax2.text(0.5, 0.5, 'No interpolation data', transform=ax2.transAxes,
+                    ha='center', va='center', fontsize=12)
+            ax2.set_title('Smoothed vs GP Interpolated Trajectory')
         
-        # If interpolated data is available, plot it as well
-        if self.interpolated_data is not None:
-            min_length_interp = min(min_length, len(self.interpolated_data))
-            interp_steps = np.linspace(0, min_length-1, min_length_interp)
-            ax2.plot(interp_steps, self.interpolated_data['x_interp'][:min_length_interp],
-                    'g--', label='Interpolated X', alpha=0.5)
-        
-        # If GP interpolation data is available, plot it as well
-        if has_gp_data:
-            gp_steps = np.linspace(0, min_length-1, len(self.gp_interpolation_data))
-            ax2.plot(gp_steps, self.gp_interpolation_data['x_gp'],
-                    'c-.', label='GP Interpolation X', alpha=0.5)
-        
-        ax2.set_xlabel('Time Step')
-        ax2.set_ylabel('X Coordinate')
-        ax2.set_title('X Coordinate Comparison')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        # 3. Y coordinate comparison
+        # 3. 速度曲线（如果有插值数据）
         ax3 = axes[1, 0]
-        ax3.plot(time_steps, self.original_data['y'][:min_length],
-                'b-', label='Original Y', alpha=0.7)
-        ax3.plot(time_steps, self.smoothed_data['y_smooth'][:min_length],
-                'r-', label='Filtered Y', alpha=0.7)
+        if has_interpolated_data:
+            interp_clean = self.interpolated_data.dropna()
+            
+            ax3.plot(interp_clean['timestamp'],
+                    interp_clean['velocity'],
+                    'b-', alpha=0.7, linewidth=2)
+            
+            ax3.set_xlabel('Time (s)')
+            ax3.set_ylabel('Velocity (m/s)')
+            ax3.set_title('GP Interpolated Velocity Profile')
+            ax3.grid(True, alpha=0.3)
+            
+            # 优化坐标轴范围
+            y_min, y_max = interp_clean['velocity'].min(), interp_clean['velocity'].max()
+            ax3.set_ylim(max(0, y_min - 0.1), y_max + 0.1)
+        else:
+            ax3.text(0.5, 0.5, 'No interpolation data', transform=ax3.transAxes,
+                    ha='center', va='center', fontsize=12)
+            ax3.set_title('GP Interpolated Velocity Profile')
         
-        # If interpolated data is available, plot it as well
-        if self.interpolated_data is not None:
-            min_length_interp = min(min_length, len(self.interpolated_data))
-            interp_steps = np.linspace(0, min_length-1, min_length_interp)
-            ax3.plot(interp_steps, self.interpolated_data['y_interp'][:min_length_interp],
-                    'g--', label='Interpolated Y', alpha=0.5)
-        
-        # If GP interpolation data is available, plot it as well
-        if has_gp_data:
-            gp_steps = np.linspace(0, min_length-1, len(self.gp_interpolation_data))
-            ax3.plot(gp_steps, self.gp_interpolation_data['y_gp'],
-                    'c-.', label='GP Interpolation Y', alpha=0.5)
-        
-        ax3.set_xlabel('Time Step')
-        ax3.set_ylabel('Y Coordinate')
-        ax3.set_title('Y Coordinate Comparison')
-        ax3.legend()
-        ax3.grid(True, alpha=0.3)
-        
-        # 4. Error plot
+        # 4. 加速度曲线（如果有插值数据）
         ax4 = axes[1, 1]
-        error_x = self.original_data['x'][:min_length] - self.smoothed_data['x_smooth'][:min_length]
-        error_y = self.original_data['y'][:min_length] - self.smoothed_data['y_smooth'][:min_length]
-        error_magnitude = np.sqrt(error_x**2 + error_y**2)
-        
-        ax4.plot(time_steps, error_x, 'r-', label='X Error', alpha=0.7)
-        ax4.plot(time_steps, error_y, 'g-', label='Y Error', alpha=0.7)
-        ax4.plot(time_steps, error_magnitude, 'k-', label='Error Magnitude', alpha=0.7, linewidth=2)
-        ax4.set_xlabel('Time Step')
-        ax4.set_ylabel('Error')
-        ax4.set_title('Error Analysis')
-        ax4.legend()
-        ax4.grid(True, alpha=0.3)
-        
-        # 5. Time parameterized plots (if available)
-        if has_time_data:
-            # Velocity plot
-            ax5 = axes[2, 0]
-            velocity = np.sqrt(self.time_parameterized_data['vx_time']**2 +
-                             self.time_parameterized_data['vy_time']**2)
-            ax5.plot(self.time_parameterized_data['timestamp'], velocity, 'b-', alpha=0.7)
-            ax5.set_xlabel('Time (s)')
-            ax5.set_ylabel('Velocity (m/s)')
-            ax5.set_title('Velocity Profile')
-            ax5.grid(True, alpha=0.3)
+        if has_interpolated_data:
+            interp_clean = self.interpolated_data.dropna()
             
-            # Trajectory with time color coding
-            ax6 = axes[2, 1]
-            scatter = ax6.scatter(self.time_parameterized_data['x_time'],
-                                self.time_parameterized_data['y_time'],
-                                c=self.time_parameterized_data['timestamp'],
-                                cmap='viridis', alpha=0.7)
-            ax6.set_xlabel('X Coordinate')
-            ax6.set_ylabel('Y Coordinate')
-            ax6.set_title('Time Parameterized Trajectory')
-            plt.colorbar(scatter, ax=ax6, label='Time (s)')
-            ax6.grid(True, alpha=0.3)
-        
-        # GP time parameterized plots (if available)
-        if has_gp_time_data:
-            # Velocity plot
-            ax7 = axes[3, 0]
-            ax7.plot(self.gp_time_parameterized_data['time'],
-                    self.gp_time_parameterized_data['velocity'],
-                    'r-', alpha=0.7, linewidth=2, label='GP Time Parameterized Velocity')
-            ax7.set_xlabel('Time (s)')
-            ax7.set_ylabel('Velocity (m/s)')
-            ax7.set_title('GP Time Parameterized Velocity Profile')
-            ax7.legend()
-            ax7.grid(True, alpha=0.3)
+            ax4.plot(interp_clean['timestamp'],
+                    interp_clean['acceleration'],
+                    'orange', alpha=0.7, linewidth=2)
             
-            # Acceleration plot
-            ax8 = axes[3, 1]
-            ax8.plot(self.gp_time_parameterized_data['time'],
-                    self.gp_time_parameterized_data['acceleration'],
-                    'g-', alpha=0.7, linewidth=2, label='GP Time Parameterized Acceleration')
-            ax8.set_xlabel('Time (s)')
-            ax8.set_ylabel('Acceleration (m/s²)')
-            ax8.set_title('GP Time Parameterized Acceleration Profile')
-            ax8.legend()
-            ax8.grid(True, alpha=0.3)
+            ax4.set_xlabel('Time (s)')
+            ax4.set_ylabel('Acceleration (m/s²)')
+            ax4.set_title('GP Interpolated Acceleration Profile')
+            ax4.grid(True, alpha=0.3)
+            
+            # 优化坐标轴范围
+            y_min, y_max = interp_clean['acceleration'].min(), interp_clean['acceleration'].max()
+            ax4.set_ylim(max(0, y_min - 0.1), y_max + 0.1)
+        else:
+            ax4.text(0.5, 0.5, 'No interpolation data', transform=ax4.transAxes,
+                    ha='center', va='center', fontsize=12)
+            ax4.set_title('GP Interpolated Acceleration Profile')
         
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.96])  # 为suptitle留出空间
         
-        # Default save path
+        # 保存图像
         if not save_path:
             save_path = 'trajectory_comparison.png'
         
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Plot saved to: {save_path}")
-        
-        # In non-interactive environment, don't call plt.show()
-        print("Note: Plot has been saved as an image file, please check the generated image")
+        print(f"图表已保存至: {save_path}")
+        print("注意: 图表已保存为图像文件，请查看生成的图像")
     
-    def run_comparison(self, original_file, smoothed_file, original_2d_file=None,
-                      interpolated_file=None, gp_interpolation_file=None,
-                      time_parameterized_file=None, gp_time_parameterized_file=None, save_plot=None):
-        """Run complete comparison analysis"""
-        print("Starting trajectory data comparison analysis...")
+    def run_comparison(self, original_file, smoothed_file, interpolated_file=None, save_plot=None):
+        """运行完整的对比分析"""
+        print("开始轨迹数据对比分析...")
         
-        # Load data
-        if not self.load_data(original_file, smoothed_file,
-                             interpolated_file, gp_interpolation_file,
-                             time_parameterized_file, gp_time_parameterized_file):
+        # 加载数据
+        if not self.load_data(original_file, smoothed_file, interpolated_file):
             return False
         
-        # Calculate statistics
+        # 计算统计信息
         stats = self.calculate_statistics()
         self.print_statistics(stats)
         
-        # Plot comparison
+        # 绘制对比图表
         self.plot_comparison(save_plot)
         
-        print("Comparison analysis completed!")
+        print("对比分析完成!")
         return True
 
 
 def main():
-    """Main function"""
-    parser = argparse.ArgumentParser(description='Trajectory Data Comparison Tool')
+    """主函数"""
+    parser = argparse.ArgumentParser(description='轨迹数据对比工具')
     parser.add_argument('--original', '-o', default='data/trajectory.csv',
-                       help='Original trajectory data file path')
+                       help='原始轨迹数据文件路径')
     parser.add_argument('--smoothed', '-s', default='output/smoothed_trajectory.csv',
-                       help='Filtered trajectory data file path')
-    parser.add_argument('--original-2d', '-2d', default='data/trajectory_2d.csv',
-                       help='2D original trajectory data file path (optional)')
-    parser.add_argument('--interpolated', '-i', default=None,
-                       help='Interpolated trajectory data file path (optional)')
-    parser.add_argument('--gp-interpolation', '-g', default='output/gp_interpolation_result.csv',
-                       help='GP interpolation result data file path (optional)')
-    parser.add_argument('--time-parameterized', '-t', default='output/time_parameterized_trajectory.csv',
-                       help='Time parameterized trajectory data file path (optional)')
-    parser.add_argument('--gp-time-parameterized', '-gt', default='output/gp_time_parameterized_result.csv',
-                       help='GP time parameterized result data file path (optional)')
+                       help='滤波后轨迹数据文件路径')
+    parser.add_argument('--interpolated', '-i', default='output/interpolated_trajectory.csv',
+                       help='插值后轨迹数据文件路径')
     parser.add_argument('--save-plot', '-p',
-                       help='Save plot to specified path')
+                       help='图表保存路径')
     
     args = parser.parse_args()
     
-    # Check if files exist
+    # 检查文件是否存在
     for file_path in [args.original, args.smoothed]:
         if not Path(file_path).exists():
-            print(f"Error: File does not exist: {file_path}")
+            print(f"错误: 文件不存在: {file_path}")
             sys.exit(1)
     
-    if args.original_2d and not Path(args.original_2d).exists():
-        print(f"Warning: 2D original data file does not exist: {args.original_2d}")
-        args.original_2d = None
-    
     if args.interpolated and not Path(args.interpolated).exists():
-        print(f"Warning: Interpolated data file does not exist: {args.interpolated}")
+        print(f"警告: 插值数据文件不存在: {args.interpolated}")
         args.interpolated = None
     
-    if args.gp_interpolation and not Path(args.gp_interpolation).exists():
-        print(f"Warning: GP interpolation data file does not exist: {args.gp_interpolation}")
-        args.gp_interpolation = None
-    
-    if args.time_parameterized and not Path(args.time_parameterized).exists():
-        print(f"Warning: Time parameterized data file does not exist: {args.time_parameterized}")
-        args.time_parameterized = None
-    
-    if args.gp_time_parameterized and not Path(args.gp_time_parameterized).exists():
-        print(f"Warning: GP time parameterized data file does not exist: {args.gp_time_parameterized}")
-        args.gp_time_parameterized = None
-    
-    # Create comparator and run analysis
+    # 创建比较器并运行分析
     comparator = TrajectoryComparator()
     comparator.run_comparison(
         original_file=args.original,
         smoothed_file=args.smoothed,
-        original_2d_file=args.original_2d,
         interpolated_file=args.interpolated,
-        gp_interpolation_file=args.gp_interpolation,
-        time_parameterized_file=args.time_parameterized,
-        gp_time_parameterized_file=args.gp_time_parameterized,
         save_plot=args.save_plot
     )
 
