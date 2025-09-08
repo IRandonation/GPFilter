@@ -12,6 +12,7 @@
 #include "MeasurementFactor.h"
 #include "VelocityConstraint.h"
 #include "AccelerationConstraint.h"
+#include "GPInterpolator.h"
 
 // 加载CSV数据文件
 std::vector<gtsam::Vector4> loadCSV(const std::string& filename) {
@@ -75,6 +76,41 @@ void saveTrajectory(const gtsam::Values& result, const std::string& filename) {
     std::cout << "滤波后的轨迹已保存到: " << filename << std::endl;
 }
 
+
+// 将Values转换为Vector4向量
+std::vector<gtsam::Vector4> valuesToVector(const gtsam::Values& result) {
+    std::vector<gtsam::Vector4> trajectory;
+    
+    for (const auto& key_value : result) {
+        gtsam::Key key = key_value.key;
+        gtsam::Vector4 state = result.at<gtsam::Vector4>(key);
+        trajectory.push_back(state);
+    }
+    
+    return trajectory;
+}
+
+// 保存Vector4向量到CSV文件（仅位置）
+void saveTrajectoryFromVector(const std::vector<gtsam::Vector4>& trajectory, const std::string& filename) {
+    std::ofstream file(filename);
+    
+    if (!file.is_open()) {
+        std::cerr << "无法创建文件: " << filename << std::endl;
+        return;
+    }
+    
+    // 创建输出目录
+    system("mkdir -p output");
+    
+    for (const auto& state : trajectory) {
+        file << state[0] << "," << state[1] << std::endl; // 保存x,y坐标
+    }
+    
+    file.close();
+    std::cout << "插值后的轨迹已保存到: " << filename << std::endl;
+}
+
+
 int main() {
     // 1. 读取轨迹数据
     std::vector<gtsam::Vector4> measurements = loadCSV("/home/chen/Documents/GPMPFilter/data/trajectory.csv");
@@ -126,10 +162,12 @@ int main() {
     }
     
     // 加速度约束（运动学约束因子）
+    // 降低噪声协方差，使加速度约束更强
     auto accel_noise = gtsam::noiseModel::Diagonal::Sigmas(
         (gtsam::Vector(2) << 0.1, 0.1).finished());
-    for (size_t i = 0; i < measurements.size(); ++i) {
-        graph.add(std::make_shared<AccelerationConstraint>(i, 2.0, accel_noise));
+    for (size_t i = 0; i < measurements.size() - 1; ++i) {
+        // 加速度约束现在需要两个相邻状态
+        graph.add(std::make_shared<AccelerationConstraint>(i, i+1, 2.0, dt, accel_noise));
     }
     
     // 5. 优化求解
@@ -138,13 +176,81 @@ int main() {
     gtsam::LevenbergMarquardtOptimizer optimizer(graph, initial, params);
     gtsam::Values result = optimizer.optimize();
     
-    // 6. 保存结果
+    // 6. 保存滤波后的轨迹
     saveTrajectory(result, "/home/chen/Documents/GPMPFilter/output/smoothed_trajectory.csv");
     
-    // 7. 输出一些统计信息
+    // 7. 将优化结果转换为Vector4向量
+    std::vector<gtsam::Vector4> smoothedTrajectory = valuesToVector(result);
+    
+    // 8. 初始化GP插值器
+    const int interpolationFactor = 10; // 插值因子，将滤波后的数据点插值为10倍
+    GPInterpolator interpolator(dt, interpolationFactor);
+    
+    // 9. 对滤波后的轨迹进行GP插值（仅用于获得平滑轨迹）
+    std::vector<gtsam::Vector4> interpolatedTrajectory = interpolator.interpolate(smoothedTrajectory);
+    std::cout << "GP插值后得到 " << interpolatedTrajectory.size() << " 个数据点" << std::endl;
+    
+    // 10. 保存插值后的平滑轨迹
+    saveTrajectoryFromVector(interpolatedTrajectory, "/home/chen/Documents/GPMPFilter/output/interpolated_trajectory.csv");
+    
+    
+    // 12. 初始化时间参数化器
+    double maxVelocity = 5.0;      // 最大速度 (m/s)
+    double maxAcceleration = 2.0;  // 最大加速度 (m/s²)
+    double defaultDt = 0.01;       // 默认时间步长 (s)
+    
+    // 14. 计算并输出速度和加速度统计信息
+    double maxVel = 0.0, avgVel = 0.0;
+    double maxAccel = 0.0, avgAccel = 0.0;
+    int count = 0;
+    
+
+    // 直接使用GP插值结果计算统计信息
+    double interpolatedDt = dt / interpolationFactor; // 计算实际的插值时间步长
+    for (size_t i = 0; i < interpolatedTrajectory.size(); ++i) {
+        const auto& state = interpolatedTrajectory[i];
+        double vel = std::sqrt(state[2] * state[2] + state[3] * state[3]);
+        maxVel = std::max(maxVel, vel);
+        avgVel += vel;
+        
+        // 计算加速度（使用中心差分法）
+        if (i > 0 && i < interpolatedTrajectory.size() - 1) {
+            const auto& prevState = interpolatedTrajectory[i-1];
+            const auto& nextState = interpolatedTrajectory[i+1];
+            
+            double ax = (nextState[2] - prevState[2]) / (2 * interpolatedDt);
+            double ay = (nextState[3] - prevState[3]) / (2 * interpolatedDt);
+            double accel = std::sqrt(ax * ax + ay * ay);
+            maxAccel = std::max(maxAccel, accel);
+            avgAccel += accel;
+            count++;
+        }
+    }
+    
+    avgVel /= interpolatedTrajectory.size();
+    if (count > 0) {
+        avgAccel /= count;
+    }
+    
+    std::cout << "=== GP插值结果统计信息 ===" << std::endl;
+    std::cout << "最大速度: " << maxVel << " m/s" << std::endl;
+    std::cout << "平均速度: " << avgVel << " m/s" << std::endl;
+    std::cout << "最大加速度: " << maxAccel << " m/s²" << std::endl;
+    std::cout << "平均加速度: " << avgAccel << " m/s²" << std::endl;
+    
+    // 16. 输出一些统计信息
     std::cout << "优化完成！" << std::endl;
     std::cout << "初始误差: " << graph.error(initial) << std::endl;
     std::cout << "最终误差: " << graph.error(result) << std::endl;
+    std::cout << "原始数据点数: " << measurements.size() << std::endl;
+    std::cout << "滤波后数据点数: " << smoothedTrajectory.size() << std::endl;
+    std::cout << "插值后数据点数: " << interpolatedTrajectory.size() << std::endl;
+    
+    // 输出文件保存信息
+    std::cout << std::endl;
+    std::cout << "=== 输出文件 ===" << std::endl;
+    std::cout << "滤波后的轨迹: output/smoothed_trajectory.csv" << std::endl;
+    std::cout << "插值后的轨迹: output/interpolated_trajectory.csv" << std::endl;
     
     return 0;
 }

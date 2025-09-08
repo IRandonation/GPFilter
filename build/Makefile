@@ -129,6 +129,30 @@ GPMPFilter/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/build
 .PHONY : GPMPFilter/fast
 
+src/GPInterpolator.o: src/GPInterpolator.cpp.o
+.PHONY : src/GPInterpolator.o
+
+# target to build an object file
+src/GPInterpolator.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/GPInterpolator.cpp.o
+.PHONY : src/GPInterpolator.cpp.o
+
+src/GPInterpolator.i: src/GPInterpolator.cpp.i
+.PHONY : src/GPInterpolator.i
+
+# target to preprocess a source file
+src/GPInterpolator.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/GPInterpolator.cpp.i
+.PHONY : src/GPInterpolator.cpp.i
+
+src/GPInterpolator.s: src/GPInterpolator.cpp.s
+.PHONY : src/GPInterpolator.s
+
+# target to generate assembly for a file
+src/GPInterpolator.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/GPInterpolator.cpp.s
+.PHONY : src/GPInterpolator.cpp.s
+
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
@@ -162,6 +186,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... GPMPFilter"
+	@echo "... src/GPInterpolator.o"
+	@echo "... src/GPInterpolator.i"
+	@echo "... src/GPInterpolator.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"

@@ -15,10 +15,12 @@ include_directories(
 
 add_executable(GPMPFilter
     src/main.cpp
+    src/GPInterpolator.cpp
     include/GPFactor.h
     include/MeasurementFactor.h
     include/VelocityConstraint.h
     include/AccelerationConstraint.h
+    include/GPInterpolator.h
 )
 
 # 手动指定 GTSAM 库路径

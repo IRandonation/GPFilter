@@ -2,14 +2,16 @@
 
 ## 项目简介
 
-GPMPFilter是一个基于高斯过程（Gaussian Process）和因子图优化的运动轨迹滤波器。该项目使用GTSAM（Georgia Tech Smoothing and Mapping）库实现了一个完整的轨迹平滑系统，能够对带有噪声的轨迹数据进行滤波和平滑处理，同时考虑运动学约束（如速度和加速度限制）。
+GPMPFilter是一个基于高斯过程（Gaussian Process）和因子图优化的运动轨迹滤波器。该项目使用GTSAM（Georgia Tech Smoothing and Mapping）库实现了一个完整的轨迹处理系统，能够对带有噪声的轨迹数据进行滤波和平滑处理，同时考虑运动学约束（如速度和加速度限制）。系统支持GP插值和时间参数化，实现了从带噪音的离散点到具体已经时间参数化的轨迹规划的完整链路。
 
 ## 核心功能
 
 - **轨迹平滑**：使用高斯过程模型对原始轨迹数据进行滤波和平滑
+- **GP插值**：将滤波后的数据点插值为10倍，以获得更平滑的轨迹
+- **时间参数化**：基于速度和加速度确定整个轨迹的时间点以及总耗时
 - **运动学约束**：支持速度和加速度约束，确保生成的轨迹符合物理规律
 - **噪声抑制**：通过测量因子抑制观测噪声
-- **可视化分析**：提供Python工具来比较原始轨迹和滤波后的轨迹
+- **可视化分析**：提供Python工具来比较原始轨迹、滤波轨迹、插值轨迹和时间参数化轨迹
 
 ## 项目结构
 
@@ -24,14 +26,19 @@ GPMPFilter/
 │   ├── GPFactor.h         # 高斯过程因子定义
 │   ├── MeasurementFactor.h # 测量因子定义
 │   ├── VelocityConstraint.h # 速度约束因子定义
-│   └── AccelerationConstraint.h # 加速度约束因子定义
+│   ├── AccelerationConstraint.h # 加速度约束因子定义
+│   ├── GPInterpolator.h   # GP插值器定义
+│   └── TimeParameterization.h # 时间参数化器定义
 ├── src/                   # C++源代码目录
-│   └── main.cpp           # 主程序实现
+│   ├── main.cpp           # 主程序实现
+│   ├── GPInterpolator.cpp # GP插值器实现
+│   └── TimeParameterization.cpp # 时间参数化器实现
 ├── data/                  # 数据文件目录
 │   ├── trajectory.csv     # 原始轨迹数据
 │   └── trajectory_2d.csv  # 2D原始轨迹数据
 ├── output/                # 输出文件目录
-│   └── smoothed_trajectory.csv # 滤波后的轨迹数据
+│   ├── smoothed_trajectory.csv # 滤波后的轨迹数据
+│   └── time_parameterized_trajectory.csv # 时间参数化后的轨迹数据
 └── build/                 # 构建目录
 ```
 
@@ -69,9 +76,38 @@ GPMPFilter/
 - **约束机制**：当加速度超过阈值时施加惩罚
 - **参数**：最大允许加速度（m/s²）
 
+### 5. GPInterpolator（GP插值器）
+
+[`GPInterpolator.h`](include/GPInterpolator.h:1)和[`GPInterpolator.cpp`](src/GPInterpolator.cpp:1)实现了高斯过程插值功能，用于将滤波后的数据点插值为更高密度的轨迹点。
+
+- **功能**：将滤波后的数据点插值为10倍，以获得更平滑的轨迹
+- **插值方法**：使用高斯过程回归进行插值
+- **核心算法**：
+  - 状态转移矩阵计算
+  - 过程噪声协方差计算
+  - 高斯过程回归插值
+- **参数**：
+  - 原始时间步长（dt）
+  - 插值因子（默认为10）
+
+### 6. TimeParameterization（时间参数化器）
+
+[`TimeParameterization.h`](include/TimeParameterization.h:1)和[`TimeParameterization.cpp`](src/TimeParameterization.cpp:1)实现了基于速度和加速度的时间参数化功能，用于确定整个轨迹的时间点以及总耗时。
+
+- **功能**：基于速度和加速度确定整个轨迹的时间点以及总耗时
+- **核心算法**：
+  - 最小时间计算（基于速度和加速度约束）
+  - 速度剖面生成（梯形或三角形速度剖面）
+  - 三次样条插值
+- **参数**：
+  - 最大速度限制（maxVelocity）
+  - 最大加速度限制（maxAcceleration）
+  - 默认时间步长（defaultDt）
+- **输出**：带时间戳的轨迹状态，包含位置和速度信息
+
 ## 主要算法流程
 
-[`main.cpp`](src/main.cpp:1)中的主程序实现了完整的轨迹滤波流程：
+[`main.cpp`](src/main.cpp:1)中的主程序实现了完整的轨迹处理流程，从带噪音的离散点到时间参数化的轨迹规划：
 
 1. **数据加载**：从CSV文件加载原始轨迹数据
 2. **因子图初始化**：创建非线性因子图和初始值估计
@@ -81,8 +117,18 @@ GPMPFilter/
    - 测量因子：抑制观测噪声
    - 速度约束：限制最大速度
    - 加速度约束：限制最大加速度
-4. **优化求解**：使用Levenberg-Marquardt优化器求解
-5. **结果保存**：将滤波后的轨迹保存到CSV文件
+4. **优化求解**：使用Levenberg-Marquardt优化器求解，获得滤波后的轨迹
+5. **GP插值**：
+   - 初始化GP插值器（插值因子为10）
+   - 对滤波后的轨迹进行GP插值，获得更平滑的轨迹
+6. **时间参数化**：
+   - 初始化时间参数化器
+   - 对插值后的平滑轨迹进行时间参数化
+   - 计算轨迹总耗时
+7. **结果保存**：
+   - 保存滤波后的轨迹到CSV文件
+   - 保存插值后的平滑轨迹到CSV文件
+   - 保存时间参数化后的轨迹到CSV文件（包含时间戳、位置和速度信息）
 
 ## 数据格式
 
@@ -95,8 +141,17 @@ GPMPFilter/
 
 ### 输出数据格式
 
-滤波后的轨迹数据（[`output/smoothed_trajectory.csv`](output/smoothed_trajectory.csv)）：
-- `x,y` 格式：包含平滑后的x和y坐标
+1. 滤波后的轨迹数据（[`output/smoothed_trajectory.csv`](output/smoothed_trajectory.csv)）：
+   - `x,y` 格式：包含平滑后的x和y坐标
+
+2. 插值后的轨迹数据（[`output/interpolated_trajectory.csv`](output/interpolated_trajectory.csv)）：
+   - `x,y` 格式：包含插值后的x和y坐标
+
+3. 时间参数化后的轨迹数据（[`output/time_parameterized_trajectory.csv`](output/time_parameterized_trajectory.csv)）：
+   - `timestamp,x,y,vx,vy` 格式：包含时间戳、位置和速度信息
+   - timestamp：时间戳（秒）
+   - x, y：位置坐标
+   - vx, vy：速度分量
 
 ## 轨迹比较工具
 
@@ -104,10 +159,15 @@ GPMPFilter/
 
 ### 功能特性
 
-- **数据加载**：支持加载原始轨迹和滤波后轨迹
+- **数据加载**：支持加载原始轨迹、滤波后轨迹、插值轨迹和时间参数化轨迹
 - **统计分析**：计算误差统计信息（均值、标准差、最大/最小误差）
-- **可视化**：生成轨迹对比图、坐标对比图和误差分析图
-- **多数据支持**：可同时比较2D和4D轨迹数据
+- **可视化**：
+  - 轨迹对比图（支持多条轨迹同时显示）
+  - 坐标对比图
+  - 误差分析图
+  - 速度剖面图（时间参数化数据）
+  - 时间颜色编码轨迹图（时间参数化数据）
+- **多数据支持**：可同时比较原始、滤波、插值和时间参数化轨迹
 
 ### 使用方法
 
@@ -120,6 +180,8 @@ python compare_trajectories.py [选项]
 - `--original, -o`：原始轨迹数据文件路径（默认：data/trajectory.csv）
 - `--smoothed, -s`：滤波后轨迹数据文件路径（默认：output/smoothed_trajectory.csv）
 - `--original-2d, -2d`：2D原始轨迹数据文件路径（可选，默认：data/trajectory_2d.csv）
+- `--interpolated, -i`：插值轨迹数据文件路径（可选）
+- `--time-parameterized, -t`：时间参数化轨迹数据文件路径（可选，默认：output/time_parameterized_trajectory.csv）
 - `--save-plot, -p`：保存图像到指定路径
 
 #### 示例
@@ -143,10 +205,12 @@ python compare_trajectories.py --save-plot comparison_result.png
    - 误差幅值（均值、标准差、最大值、最小值）
 
 2. **可视化图表**：
-   - 轨迹对比图
+   - 轨迹对比图（支持多条轨迹同时显示）
    - X坐标对比图
    - Y坐标对比图
    - 误差分析图
+   - 速度剖面图（时间参数化数据）
+   - 时间颜色编码轨迹图（时间参数化数据）
 
 ## 构建和运行
 

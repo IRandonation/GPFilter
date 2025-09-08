@@ -983,4 +983,5 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: \
  /home/chen/Documents/GPMPFilter/include/GPFactor.h \
  /home/chen/Documents/GPMPFilter/include/MeasurementFactor.h \
  /home/chen/Documents/GPMPFilter/include/VelocityConstraint.h \
- /home/chen/Documents/GPMPFilter/include/AccelerationConstraint.h
+ /home/chen/Documents/GPMPFilter/include/AccelerationConstraint.h \
+ /home/chen/Documents/GPMPFilter/include/GPInterpolator.h
