@@ -97,7 +97,7 @@ int main() {
     // 4. 添加因子
     const double dt = 0.1;
     auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(4) << 0.1, 0.1, 0.5, 0.5).finished());
+        (gtsam::Vector(4) << 0.06, 0.06, 0.5, 0.5).finished());
     
     // 起点/终点约束（先验因子）
     graph.add(gtsam::PriorFactor<gtsam::Vector4>(0, measurements[0], prior_noise));
@@ -106,13 +106,13 @@ int main() {
     
     // GP过程因子（建模动力学连续性）
     auto gp_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(4) << 0.05, 0.05, 0.1, 0.1).finished());
+        (gtsam::Vector(4) << 0.1, 0.1, 0.1, 0.1).finished());
     for (size_t i = 0; i < measurements.size()-1; ++i) {
         graph.add(std::make_shared<GPFactor>(i, i+1, dt, gp_noise));
     }
     
     // 测量因子（抑制观测噪声）
-    auto meas_noise = gtsam::noiseModel::Isotropic::Sigma(2, 0.3);
+    auto meas_noise = gtsam::noiseModel::Isotropic::Sigma(2, 0.1);
     for (size_t i = 1; i < measurements.size()-1; ++i) {
         graph.add(std::make_shared<MeasurementFactor>(
             i, gtsam::Point2(measurements[i][0], measurements[i][1]), meas_noise));
@@ -122,14 +122,14 @@ int main() {
     auto vel_noise = gtsam::noiseModel::Diagonal::Sigmas(
         (gtsam::Vector(2) << 0.1, 0.1).finished());
     for (size_t i = 0; i < measurements.size(); ++i) {
-        graph.add(std::make_shared<VelocityConstraint>(i, 2.0, vel_noise));
+        graph.add(std::make_shared<VelocityConstraint>(i, 5.0, vel_noise));
     }
     
     // 加速度约束（运动学约束因子）
     auto accel_noise = gtsam::noiseModel::Diagonal::Sigmas(
         (gtsam::Vector(2) << 0.1, 0.1).finished());
     for (size_t i = 0; i < measurements.size(); ++i) {
-        graph.add(std::make_shared<AccelerationConstraint>(i, 1.0, accel_noise));
+        graph.add(std::make_shared<AccelerationConstraint>(i, 2.0, accel_noise));
     }
     
     // 5. 优化求解
