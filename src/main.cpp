@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <chrono>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/geometry/Point2.h>
@@ -154,7 +155,7 @@ int main() {
         std::cerr << "没有加载到数据，程序退出" << std::endl;
         return 1;
     }
-    
+
     // 2. 初始化因子图
     gtsam::NonlinearFactorGraph graph;
     gtsam::Values initial;
@@ -246,6 +247,9 @@ int main() {
         // 加速度约束现在使用自适应时间步长
         graph.add(std::make_shared<AccelerationConstraint>(i, i+1, maxAcceleration, adaptiveDts[i], accel_noise));
     }
+
+    // 开始计时
+    auto start_time = std::chrono::high_resolution_clock::now();
     
     // 5. 优化求解
     gtsam::LevenbergMarquardtParams params;
@@ -345,6 +349,13 @@ int main() {
     std::cout << "=== 输出文件 ===" << std::endl;
     std::cout << "滤波后的轨迹: output/smoothed_trajectory.csv" << std::endl;
     std::cout << "插值后的轨迹: output/interpolated_trajectory.csv" << std::endl;
+    
+    // 结束计时并输出总运行时间
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << std::endl;
+    std::cout << "=== 计算时间统计 ===" << std::endl;
+    std::cout << "程序总运行时间: " << duration.count() << " 毫秒" << std::endl;
     
     return 0;
 }

@@ -11,12 +11,14 @@ GPInterpolator::GPInterpolator(double dt, int interpolationFactor)
     interpolatedDt_ = dt_ / interpolationFactor_;
     lengthScale_ = dt_;  // 默认特征长度为原始时间间隔，平衡平滑性与跟踪性
     noiseSigma_ = 0.01;  // 默认观测噪声较小，保证与原始轨迹接近
+    inv_lengthScale_sq_ = 1.0 / (lengthScale_ * lengthScale_);
 }
+
 
 // 核函数：平方指数核，控制时间点之间的相关性
 double GPInterpolator::kernel(double t1, double t2) const {
     double dt = t1 - t2;
-    return exp(-0.5 * (dt * dt) / (lengthScale_ * lengthScale_));
+    return exp(-0.5 * (dt * dt) * inv_lengthScale_sq_);
 }
 
 // 构建原始点之间的协方差矩阵
@@ -25,11 +27,14 @@ gtsam::Matrix GPInterpolator::buildCovarianceMatrix(const std::vector<double>& t
     gtsam::Matrix K(n, n);
     
     for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
+        // 只计算上三角部分（i <= j），再复制到下三角
+        for (int j = i; j < n; ++j) {  // j从i开始，避免重复计算
+            double dt = times[i] - times[j];
             K(i, j) = kernel(times[i], times[j]);
-            // 对角线添加噪声项，保证矩阵可逆性
             if (i == j) {
-                K(i, j) += noiseSigma_ * noiseSigma_;
+                K(i, j) += noiseSigma_ * noiseSigma_;  // 对角线加噪声
+            } else {
+                K(j, i) = K(i, j);  // 对称复制
             }
         }
     }
@@ -93,8 +98,17 @@ std::vector<gtsam::Vector4> GPInterpolator::interpolate(
     }
     
     // 构建并求逆协方差矩阵（只计算一次，提高效率）
+    int n = originalTimes.size();
     gtsam::Matrix KXX = buildCovarianceMatrix(originalTimes);
-    gtsam::Matrix KXX_inv = KXX.inverse();
+    // 对正定矩阵进行Cholesky分解（LDLT更稳定，支持数值扰动）
+    Eigen::LDLT<gtsam::Matrix> ldlt(KXX);
+    // 检查分解是否成功（处理数值问题）
+    if (ldlt.info() != Eigen::Success) {
+        // 添加微小扰动确保正定（可选，根据实际场景调整）
+        KXX += Eigen::MatrixXd::Identity(n, n) * 1e-8;
+        ldlt.compute(KXX);
+    }
+    gtsam::Matrix KXX_inv = ldlt.solve(Eigen::MatrixXd::Identity(n, n));
     
     // 对每个插值时间点进行估计
     for (double t : interpolatedTimes) {
@@ -124,6 +138,7 @@ double GPInterpolator::getInterpolatedDt() const {
 // 设置核函数特征长度（新增接口，控制平滑度）
 void GPInterpolator::setLengthScale(double l) {
     lengthScale_ = l;
+    inv_lengthScale_sq_ = 1.0 / (lengthScale_ * lengthScale_);  // 更新
 }
 
 // 设置观测噪声（新增接口，控制与原始点的接近程度）

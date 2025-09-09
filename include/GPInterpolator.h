@@ -10,6 +10,7 @@ private:
     double interpolatedDt_;       // 插值后时间间隔
     double lengthScale_;          // 核函数特征长度（控制平滑度）
     double noiseSigma_;           // 观测噪声标准差（控制与原始点的接近程度）
+    double inv_lengthScale_sq_;
 
     // 核函数：平方指数核，定义时间点之间的相关性
     double kernel(double t1, double t2) const;
