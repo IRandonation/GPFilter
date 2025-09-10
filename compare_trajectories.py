@@ -165,7 +165,7 @@ class TrajectoryComparator:
             # 绘制插值轨迹
             ax2.plot(interp_clean['x'],
                     interp_clean['y'],
-                    'g--', label='GP Interpolated', alpha=0.7, linewidth=1.5)
+                    'b--', label='GP Interpolated', alpha=0.7, linewidth=1.85)
             
             ax2.set_xlabel('X')
             ax2.set_ylabel('Y')

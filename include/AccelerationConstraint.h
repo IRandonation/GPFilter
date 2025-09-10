@@ -80,7 +80,7 @@ public:
                     }
                     
                     *H1 << 0, 0, derror_dv1x, derror_dv1y,
-                           0, 0, derror_dv1y, derror_dv1y;  // 这里应该是正确的导数计算
+                           0, 0, 0, derror_dv1y;  // 修正：第二行第一个元素应该是0
                 } else {
                     *H1 << 0, 0, 0, 0,
                            0, 0, 0, 0;
@@ -109,13 +109,14 @@ public:
                     }
                     
                     *H2 << 0, 0, derror_dv2x, derror_dv2y,
-                           0, 0, derror_dv2y, derror_dv2y;  // 这里应该是正确的导数计算
+                           0, 0, 0, derror_dv2y;  // 修正：第二行第一个元素应该是0
                 } else {
                     *H2 << 0, 0, 0, 0,
                            0, 0, 0, 0;
                 }
             }
         }
+        // std::cout << "[DEBUG] 本因子误差向量: " << error << ", 范数: " << error.norm() << std::endl;
 
         return error;
     }

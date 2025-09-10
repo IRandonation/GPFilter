@@ -1,6 +1,8 @@
 file(REMOVE_RECURSE
   "CMakeFiles/GPMPFilter.dir/src/GPInterpolator.cpp.o"
   "CMakeFiles/GPMPFilter.dir/src/GPInterpolator.cpp.o.d"
+  "CMakeFiles/GPMPFilter.dir/src/VelocityEstimator.cpp.o"
+  "CMakeFiles/GPMPFilter.dir/src/VelocityEstimator.cpp.o.d"
   "CMakeFiles/GPMPFilter.dir/src/main.cpp.o"
   "CMakeFiles/GPMPFilter.dir/src/main.cpp.o.d"
   "GPMPFilter"

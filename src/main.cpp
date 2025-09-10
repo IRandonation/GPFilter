@@ -14,6 +14,7 @@
 #include "VelocityConstraint.h"
 #include "AccelerationConstraint.h"
 #include "GPInterpolator.h"
+#include "VelocityEstimator.h"
 
 // 加载CSV数据文件
 std::vector<gtsam::Vector4> loadCSV(const std::string& filename) {
@@ -46,22 +47,32 @@ std::vector<gtsam::Vector4> loadCSV(const std::string& filename) {
     }
     file.close();
     
-    // 第二步：根据位置差估算初始速度（关键修改）
-    double defaultDt = 0.1; // 假设原始数据的默认时间步长（需根据你的数据实际情况调整！）
-    for (size_t i = 0; i < positions.size(); ++i) {
-        gtsam::Vector4 state;
-        state << positions[i].x(), positions[i].y(), 0.0, 0.0;
-        
-        // 对非第一个点，用前一位置的差分估算速度（避免初始速度为0）
-        if (i > 0) {
-            double dx = positions[i].x() - positions[i-1].x();
-            double dy = positions[i].y() - positions[i-1].y();
-            state[2] = dx / defaultDt; // vx = Δx / Δt
-            state[3] = dy / defaultDt; // vy = Δy / Δt
-        }
-        
-        measurements.push_back(state);
+    // 第二步：使用速度估计器估算初始速度
+    double initialDt = 0.1; // 假设原始数据的默认时间步长（需根据你的数据实际情况调整！）
+    
+    // 创建速度估计器，使用匀速模型方法
+    // 可以选择以下方法：
+    // VelocityEstimator::SIMPLE_DIFFERENCE - 简单差分法（原始方法）
+    // VelocityEstimator::CONSTANT_VELOCITY - 匀速模型估计（推荐）
+    // VelocityEstimator::KALMAN_FILTER - 卡尔曼滤波估计
+    VelocityEstimator estimator(VelocityEstimator::CONSTANT_VELOCITY, 5, initialDt);
+    
+    // 使用速度估计器估算速度
+    measurements = estimator.estimateVelocities(positions);
+    
+    std::cout << "使用速度估计器完成速度估计，方法: ";
+    switch (estimator.getEstimationMethod()) {
+        case VelocityEstimator::SIMPLE_DIFFERENCE:
+            std::cout << "简单差分法";
+            break;
+        case VelocityEstimator::CONSTANT_VELOCITY:
+            std::cout << "匀速模型估计";
+            break;
+        case VelocityEstimator::KALMAN_FILTER:
+            std::cout << "卡尔曼滤波估计";
+            break;
     }
+    std::cout << ", 窗口大小: " << estimator.getWindowSize() << std::endl;
     
     return measurements;
 }
@@ -117,7 +128,6 @@ void saveTrajectoryFromVector(const std::vector<gtsam::Vector4>& trajectory, con
     
     // 写入CSV头
     file << "timestamp,x,y,vx,vy,velocity,acceleration" << std::endl;
-    double maxDt = 0.2; // 根据实际场景设置（如10Hz采集对应0.1s，20Hz对应0.05s）
     for (size_t i = 0; i < trajectory.size(); ++i) {
         const auto& state = trajectory[i];
         double timestamp = i * dt; // 计算时间戳
@@ -166,51 +176,29 @@ int main() {
     }
     
     // 4. 添加因子
-    // 自适应时间参数化：根据速度加速度约束计算时间步长
-    double maxVelocity = 5.0;      // 最大速度 (m/s)
-    double maxAcceleration = 2.0;  // 最大加速度 (m/s²)
-    double minDt = 0.005;           // 最小时间步长 (s)
+    // 使用固定时间步长
+    const double dt = 0.1;  // 固定时间步长 (s)
     
-    // 计算自适应时间步长
-    std::vector<double> adaptiveDts;
-    for (size_t i = 0; i < measurements.size() - 1; ++i) {
-        const gtsam::Vector4& state1 = measurements[i];
-        const gtsam::Vector4& state2 = measurements[i+1];
-        
-        // 提取位置和速度
-        gtsam::Vector2 pos1 = state1.head(2);
-        gtsam::Vector2 pos2 = state2.head(2);
-        gtsam::Vector2 vel1 = state1.tail(2);
-        gtsam::Vector2 vel2 = state2.tail(2);
-        
-        // 计算位置差
-        gtsam::Vector2 deltaPos = pos2 - pos1;
-        double distance = deltaPos.norm();
-        
-        // 计算速度变化
-        gtsam::Vector2 deltaVel = vel2 - vel1;
-        double deltaVelMagnitude = deltaVel.norm();
-        
-        // 基于加速度约束计算最小时间
-        double timeFromAcceleration = deltaVelMagnitude / maxAcceleration;
-        
-        // 基于速度约束计算最小时间
-        double avgSpeed = (vel1.norm() + vel2.norm()) / 2.0;
-        double timeFromDistance = distance / std::max(avgSpeed, 0.1); // 避免除零
-        
-        // 取两者中的较大值，确保同时满足速度和加速度约束
-        double minTime = std::max(timeFromAcceleration, timeFromDistance);
-        double maxDt = 0.12; // 根据实际场景设置（60Hz采集对应0.12s）
-        double adaptiveDt = std::clamp(minTime, minDt, maxDt); // 限制在 [minDt, maxDt] 之间
-        
-        adaptiveDts.push_back(adaptiveDt);
+    // 根据新的速度估计方法调整约束参数
+    // 首先计算初始速度的最大值，以设置合理的约束
+    double maxInitialVel = 0.0;
+    for (const auto& state : measurements) {
+        double vel = std::sqrt(state[2] * state[2] + state[3] * state[3]);
+        maxInitialVel = std::max(maxInitialVel, vel);
     }
     
-    // 使用第一个自适应dt作为基准
-    const double dt = adaptiveDts[0];
+    // 设置最大速度和加速度约束，基于初始估计值
+    double maxVelocity = std::max(20.0, maxInitialVel * 2.0);      // 最大速度 (m/s) - 放宽约束
+    double maxAcceleration = 5.0;  // 最大加速度 (m/s²) - 放宽约束
     
+    std::cout << "初始最大速度估计: " << maxInitialVel << " m/s" << std::endl;
+    std::cout << "设置最大速度约束: " << maxVelocity << " m/s" << std::endl;
+    std::cout << "设置最大加速度约束: " << maxAcceleration << " m/s²" << std::endl;
+    
+    // 调整噪声模型参数，使其更适合新的速度估计
+    // 先验因子噪声：位置更精确，速度较宽松
     auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(4) << 0.06, 0.06, 0.2, 0.2).finished());
+        (gtsam::Vector(4) << 0.1, 0.1, 1.0, 1.0).finished());  // 放宽位置和速度噪声
     
     // 起点/终点约束（先验因子）
     graph.add(gtsam::PriorFactor<gtsam::Vector4>(0, measurements[0], prior_noise));
@@ -219,14 +207,14 @@ int main() {
     
     // GP过程因子（建模动力学连续性）
     auto gp_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(4) << 0.05, 0.05, 0.02, 0.02).finished());
+        (gtsam::Vector(4) << 0.5, 0.5, 1.0, 1.0).finished());  // 进一步放宽GP约束
     for (size_t i = 0; i < measurements.size()-1; ++i) {
-        // 使用自适应时间步长
-        graph.add(std::make_shared<GPFactor>(i, i+1, adaptiveDts[i], gp_noise));
+        // 使用固定时间步长
+        graph.add(std::make_shared<GPFactor>(i, i+1, dt, gp_noise));
     }
     
     // 测量因子（抑制观测噪声）
-    auto meas_noise = gtsam::noiseModel::Isotropic::Sigma(2, 0.1);
+    auto meas_noise = gtsam::noiseModel::Isotropic::Sigma(2, 1.5);  // 大幅放宽测量噪声
     for (size_t i = 1; i < measurements.size()-1; ++i) {
         graph.add(std::make_shared<MeasurementFactor>(
             i, gtsam::Point2(measurements[i][0], measurements[i][1]), meas_noise));
@@ -234,26 +222,43 @@ int main() {
     
     // 速度约束（运动学约束因子）
     auto vel_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(2) << 0.1, 0.1).finished());
+        (gtsam::Vector(2) << 3.0, 3.0).finished());  // 放宽速度约束噪声
     for (size_t i = 0; i < measurements.size(); ++i) {
-        graph.add(std::make_shared<VelocityConstraint>(i, 5.0, vel_noise));
+        graph.add(std::make_shared<VelocityConstraint>(i, maxVelocity, vel_noise));
     }
     
     // 加速度约束（运动学约束因子）
-    // 降低噪声协方差，使加速度约束更强
     auto accel_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(2) << 0.01, 0.01).finished());
+        (gtsam::Vector(2) << 3.0, 3.0).finished());  // 放宽加速度约束噪声
     for (size_t i = 0; i < measurements.size() - 1; ++i) {
-        // 加速度约束现在使用自适应时间步长
-        graph.add(std::make_shared<AccelerationConstraint>(i, i+1, maxAcceleration, adaptiveDts[i], accel_noise));
+        // 加速度约束使用固定时间步长
+        graph.add(std::make_shared<AccelerationConstraint>(i, i+1, maxAcceleration, dt, accel_noise));
     }
 
     // 开始计时
     auto start_time = std::chrono::high_resolution_clock::now();
     
+    // 输出初始误差信息
+    std::cout << "=== 初始误差分析 ===" << std::endl;
+    std::cout << "初始总误差: " << graph.error(initial) << std::endl;
+    
+    // 检查各个因子的贡献
+    for (size_t i = 0; i < graph.size(); ++i) {
+        double factor_error = graph.at(i)->error(initial);
+        std::cout << "因子 " << i << " 误差: " << factor_error << std::endl;
+    }
+    
     // 5. 优化求解
     gtsam::LevenbergMarquardtParams params;
     params.setVerbosity("TERMINATION");
+    params.setMaxIterations(1000);  // 增加最大迭代次数
+    params.setRelativeErrorTol(1e-5);  // 设置相对误差容差
+    params.setAbsoluteErrorTol(1e-3);  // 设置绝对误差容差
+    params.setlambdaInitial(1e-5);  // 设置较小的初始lambda值
+    params.setlambdaFactor(2.0);  // 设置lambda增长因子
+    params.setlambdaUpperBound(1e10);  // 设置lambda上界
+    params.setlambdaLowerBound(1e-10);  // 设置lambda下界
+    params.setUseFixedLambdaFactor(false);  // 允许动态调整lambda
     gtsam::LevenbergMarquardtOptimizer optimizer(graph, initial, params);
     gtsam::Values result = optimizer.optimize();
     
@@ -265,28 +270,24 @@ int main() {
     
     // 8. 初始化GP插值器
     const int interpolationFactor = 10; // 插值因子，将滤波后的数据点插值为10倍
-    // 使用平均自适应时间步长作为插值器的基础时间步长
-    double avgAdaptiveDt = 0.0;
-    for (double dt_val : adaptiveDts) {
-        avgAdaptiveDt += dt_val;
-    }
-    avgAdaptiveDt /= adaptiveDts.size();
-    GPInterpolator interpolator(avgAdaptiveDt, interpolationFactor);
+    
+    // 使用固定时间步长作为插值器的基础时间步长
+    GPInterpolator interpolator(dt, interpolationFactor);
 
-    interpolator.setLengthScale(avgAdaptiveDt * 2);  // 特征长度：建议设为平均时间步的0.5-1倍（值越大越平滑）
-    interpolator.setNoiseSigma(0.05);                  // 观测噪声：建议设为0.01-0.05（值越小越贴近原始滤波轨迹）
+    interpolator.setLengthScale(dt * 1.10);  // 特征长度：设为时间步的1倍，平衡平滑性与跟踪性
+    interpolator.setNoiseSigma(0.25);      // 观测噪声：减小噪声，使插值更贴近原始滤波轨迹
     
     // 9. 对滤波后的轨迹进行GP插值（仅用于获得平滑轨迹）
     std::vector<gtsam::Vector4> interpolatedTrajectory = interpolator.interpolate(smoothedTrajectory);
     std::cout << "GP插值后得到 " << interpolatedTrajectory.size() << " 个数据点" << std::endl;
     
     // 10. 保存插值后的平滑轨迹（包含时间戳、速度和加速度）
-    double interpolatedDt = avgAdaptiveDt / interpolationFactor; // 使用平均自适应时间步长
+    double interpolatedDt = dt / interpolationFactor; // 使用固定时间步长
     saveTrajectoryFromVector(interpolatedTrajectory, "/home/chen/Documents/GPMPFilter/output/interpolated_trajectory.csv", interpolatedDt);
     
     
     // 12. 初始化时间参数化器
-    double defaultDt = 0.01;       // 默认时间步长 (s)
+    // 使用固定时间步长作为基准
     
     // 14. 计算并输出速度和加速度统计信息
     double maxVel = 0.0, avgVel = 0.0;
@@ -306,7 +307,8 @@ int main() {
             const auto& prevState = interpolatedTrajectory[i-1];
             const auto& nextState = interpolatedTrajectory[i+1];
             
-            double currentInterpolatedDt = avgAdaptiveDt / interpolationFactor; // 使用平均自适应时间步长
+            // 使用插值后的时间步长
+            double currentInterpolatedDt = dt / interpolationFactor;
             double ax = (nextState[2] - prevState[2]) / (2 * currentInterpolatedDt);
             double ay = (nextState[3] - prevState[3]) / (2 * currentInterpolatedDt);
             double accel = std::sqrt(ax * ax + ay * ay);
@@ -320,6 +322,13 @@ int main() {
     if (count > 0) {
         avgAccel /= count;
     }
+
+    for (size_t i = 0; i < 10; ++i) {
+        const auto& state_before = initial.at<gtsam::Vector4>(i);
+        const auto& state_after = result.at<gtsam::Vector4>(i);
+        std::cout << "点 " << i << ": 优化前 = " << state_before.transpose()
+              << ", 优化后 = " << state_after.transpose() << std::endl;
+    }
     
     std::cout << "=== GP插值结果统计信息 ===" << std::endl;
     std::cout << "最大速度: " << maxVel << " m/s" << std::endl;
@@ -327,14 +336,9 @@ int main() {
     std::cout << "最大加速度: " << maxAccel << " m/s²" << std::endl;
     std::cout << "平均加速度: " << avgAccel << " m/s²" << std::endl;
     
-    // 输出自适应时间步长统计信息
-    std::cout << "=== 自适应时间步长统计信息 ===" << std::endl;
-    double minAdaptiveDt = *std::min_element(adaptiveDts.begin(), adaptiveDts.end());
-    double maxAdaptiveDt = *std::max_element(adaptiveDts.begin(), adaptiveDts.end());
-    std::cout << "最小自适应时间步长: " << minAdaptiveDt << " s" << std::endl;
-    std::cout << "最大自适应时间步长: " << maxAdaptiveDt << " s" << std::endl;
-    std::cout << "平均自适应时间步长: " << avgAdaptiveDt << " s" << std::endl;
-    std::cout << "原始固定时间步长: " << 0.1 << " s" << std::endl;
+    // 输出固定时间步长信息
+    std::cout << "=== 固定时间步长信息 ===" << std::endl;
+    std::cout << "固定时间步长: " << dt << " s" << std::endl;
     
     // 16. 输出一些统计信息
     std::cout << "优化完成！" << std::endl;

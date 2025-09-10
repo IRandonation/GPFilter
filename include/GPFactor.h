@@ -21,13 +21,20 @@ public:
         if (H1) {
             // 雅可比矩阵应该是误差向量(4维)对状态变量(4维)的导数
             // H1 是误差对 x1 的导数，维度为 4x4
-            *H1 = -F_.transpose();
+            // 误差函数: error = x2 - F_ * x1
+            // 对 x1 的导数是 -F_
+            *H1 = -F_;
         }
         
         if (H2) {
             // H2 是误差对 x2 的导数，维度为 4x4
+            // 误差函数: error = x2 - F_ * x1
+            // 对 x2 的导数是单位矩阵
             *H2 = gtsam::Matrix4::Identity();
         }
+        // gtsam::Vector error = x2 - F_ * x1;
+
+        // std::cout << "[DEBUG] 本因子误差向量: " << error << ", 范数: " << error.norm() << std::endl;
         
         return x2 - F_ * x1;
     }

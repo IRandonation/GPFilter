@@ -47,7 +47,7 @@ public:
             *H << 0, 0, 1, 0,         // vx对误差的导数
                   0, 0, 0, 1;         // vy对误差的导数
         }
-
+        // std::cout << "[DEBUG] 本因子误差向量: " << error << ", 范数: " << error.norm() << std::endl;
         return error;
     }
 };
