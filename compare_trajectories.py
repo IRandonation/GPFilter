@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Trajectory Data Comparison Tool
-用于对比原始轨迹数据与滤波、插值轨迹数据
+Trajectory Data Comparison Tool (6DOF)
+用于对比原始、滤波、插值轨迹数据（支持 x,y,z,roll,pitch,yaw 与速度、加速度等）
+支持 3D 轨迹、姿态、速度、加速度等全方位对比
 """
 
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')  # 使用非交互式后端
+matplotlib.use('Agg')  # 使用非交互式后端，适合服务器
 import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
@@ -15,272 +16,243 @@ import sys
 
 
 class TrajectoryComparator:
-    """轨迹数据对比器"""
-    
     def __init__(self):
         self.original_data = None
         self.smoothed_data = None
         self.interpolated_data = None
-        
+
     def load_data(self, original_file, smoothed_file, interpolated_file):
-        """加载数据文件并正确映射列名"""
+        def load_and_pad(filepath, expected_columns=None):
+            # 读取无列名的 CSV 文件
+            df = pd.read_csv(filepath, header=None)
+            df = df.apply(pd.to_numeric, errors='coerce')
+
+            if expected_columns is None:
+                # 我们期望的标准列名，对应 x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw
+                expected_columns = ['x', 'y', 'z', 'roll', 'pitch', 'yaw', 'vx', 'vy', 'vz', 'vroll', 'vpitch', 'vyaw']
+
+            num_expected = len(expected_columns)  # 12 列
+            current_cols = df.shape[1]  # 当前数据有几列
+
+            print(f"📥 加载文件: {filepath}")
+            print(f"   当前数据列数: {current_cols}, 数据点数: {len(df)}")
+
+            if current_cols < num_expected:
+                # 不够的列 → 补 0 列
+                num_missing = num_expected - current_cols
+                print(f"   ⚠️  数据列不足，自动补 {num_missing} 个 0 列，以达到 {num_expected} 列格式")
+                for i in range(num_missing):
+                    df[i + current_cols] = 0.0  # 新增列，值全为 0.0
+                # 截取为标准 12 列
+                df = df.iloc[:, :num_expected]
+            elif current_cols > num_expected:
+                # 如果列太多，只取前 12 列（避免干扰，比如原始数据有额外列）
+                print(f"   ⚠️  数据列过多，只取前 {num_expected} 列")
+                df = df.iloc[:, :num_expected]
+
+            # 设置标准的列名
+            df.columns = expected_columns
+            return df
+
         try:
-            # 加载原始轨迹数据 (x, y)
-            self.original_data = pd.read_csv(original_file, header=None,
-                                           names=['x', 'y'])
-            self.original_data = self.original_data.apply(pd.to_numeric, errors='coerce')
-            print(f"成功加载原始数据: {original_file}")
-            print(f"数据点数量: {len(self.original_data)}")
-            
-            # 加载滤波轨迹数据 (x, y)
-            self.smoothed_data = pd.read_csv(smoothed_file, header=None,
-                                           names=['x_smooth', 'y_smooth'])
-            self.smoothed_data = self.smoothed_data.apply(pd.to_numeric, errors='coerce')
-            print(f"成功加载滤波数据: {smoothed_file}")
-            print(f"数据点数量: {len(self.smoothed_data)}")
-            
-            # 加载插值轨迹数据（带时间戳、速度和加速度）
-            if interpolated_file:
+            # === 1. 原始数据（可能只有 x,y，其他自动补0，最终12列）
+            self.original_data = load_and_pad(original_file)
+            print(f"✅ 原始数据加载完成，列名: {list(self.original_data.columns)}")
+            print(f"   数据点数: {len(self.original_data)}")
+
+            # === 2. 滤波数据（smoothed，同上，自动补0到12列）
+            self.smoothed_data = load_and_pad(smoothed_file)
+            print(f"✅ 滤波数据加载完成，列名: {list(self.smoothed_data.columns)}")
+            print(f"   数据点数: {len(self.smoothed_data)}")
+
+            # === 3. 插值数据（可能包含更多列，比如 timestamp, velocity, acceleration...）
+            if interpolated_file and Path(interpolated_file).exists():
                 self.interpolated_data = pd.read_csv(interpolated_file)
                 self.interpolated_data = self.interpolated_data.apply(pd.to_numeric, errors='coerce')
-                print(f"成功加载插值数据: {interpolated_file}")
-                print(f"数据点数量: {len(self.interpolated_data)}")
-                print(f"时间范围: {self.interpolated_data['timestamp'].min():.3f} 到 {self.interpolated_data['timestamp'].max():.3f} 秒")
-            
+                print(f"✅ 插值数据加载完成，列名: {list(self.interpolated_data.columns)}")
+                print(f"   数据点数: {len(self.interpolated_data)}")
+                print(f"   时间范围: {self.interpolated_data['timestamp'].min():.3f} ~ {self.interpolated_data['timestamp'].max():.3f} 秒")
+            else:
+                self.interpolated_data = None
+                print("⚠️  未提供插值数据文件，或文件不存在，跳过插值数据对比")
+
             return True
-            
+
         except Exception as e:
-            print(f"加载数据失败: {e}")
+            print(f"❌ 加载数据失败: {e}")
             return False
+
+    def plot_3d_trajectories_interactive(self, save_path=None):
+        """
+        使用 Plotly 绘制可交互的 3D 轨迹对比图（原始 vs 滤波 vs 插值）
+        并保存为 .html 文件，支持拖拽旋转、缩放
+        """
+        import plotly.graph_objs as go
+        from plotly.subplots import make_subplots
+        import plotly.offline as pyo
     
-    def calculate_statistics(self):
-        """计算原始轨迹与滤波轨迹之间的统计信息"""
-        if self.original_data is None or self.smoothed_data is None:
-            print("错误: 请先加载数据")
-            return None
-            
-        # 清除NaN值
-        orig_clean = self.original_data.dropna()
-        smooth_clean = self.smoothed_data.dropna()
-        
-        # 确保数据长度一致
-        min_length = min(len(orig_clean), len(smooth_clean))
-        orig_x = orig_clean['x'].values[:min_length]
-        orig_y = orig_clean['y'].values[:min_length]
-        smooth_x = smooth_clean['x_smooth'].values[:min_length]
-        smooth_y = smooth_clean['y_smooth'].values[:min_length]
-        
-        # 计算误差
-        error_x = orig_x - smooth_x
-        error_y = orig_y - smooth_y
-        error_magnitude = np.sqrt(error_x**2 + error_y**2)
-        
-        # 移除误差中的NaN值
-        error_x = error_x[~np.isnan(error_x)]
-        error_y = error_y[~np.isnan(error_y)]
-        error_magnitude = error_magnitude[~np.isnan(error_magnitude)]
-        
-        if len(error_magnitude) == 0:
-            print("警告: 没有有效的数据点用于误差计算")
-            return None
-        
-        stats = {
-            'x_error_mean': np.mean(error_x),
-            'x_error_std': np.std(error_x),
-            'y_error_mean': np.mean(error_y),
-            'y_error_std': np.std(error_y),
-            'magnitude_error_mean': np.mean(error_magnitude),
-            'magnitude_error_std': np.std(error_magnitude),
-            'max_error': np.max(error_magnitude),
-            'min_error': np.min(error_magnitude)
-        }
-        
-        return stats
+        fig = go.Figure()
     
-    def print_statistics(self, stats):
-        """以英文表格形式打印统计信息"""
-        if stats is None:
+        # --- 原始轨迹
+        if self.original_data is not None:
+            fig.add_trace(go.Scatter3d(
+                x=self.original_data['x'],
+                y=self.original_data['y'],
+                z=self.original_data['z'],
+                mode='lines+markers',
+                name='Original',
+                line=dict(color='blue', width=4),
+                marker=dict(size=3)
+            ))
+    
+        # --- 滤波轨迹
+        if self.smoothed_data is not None:
+            fig.add_trace(go.Scatter3d(
+                x=self.smoothed_data['x'],
+                y=self.smoothed_data['y'],
+                z=self.smoothed_data['z'],
+                mode='lines+markers',
+                name='Smoothed',
+                line=dict(color='red', width=4),
+                marker=dict(size=3)
+            ))
+    
+        # --- 插值轨迹
+        if self.interpolated_data is not None:
+            fig.add_trace(go.Scatter3d(
+                x=self.interpolated_data['x'],
+                y=self.interpolated_data['y'],
+                z=self.interpolated_data['z'],
+                mode='lines+markers',
+                name='Interpolated',
+                line=dict(color='green', width=4),
+                marker=dict(size=3)
+            ))
+    
+        # --- 图表布局
+        fig.update_layout(
+            title='3D Trajectory Comparison: Original vs Smoothed vs Interpolated (可拖拽旋转)',
+            scene=dict(
+                xaxis_title='X [m]',
+                yaxis_title='Y [m]',
+                zaxis_title='Z [m]'
+            ),
+            width=1000,
+            height=700
+        )
+    
+        # --- 保存为交互式 HTML 文件
+        if save_path is None:
+            save_path = './plots/3d_trajectory_comparison_interactive.html'
+    
+        pyo.plot(fig, filename=save_path, auto_open=False)
+        print(f"📊 可交互的 3D 轨迹图已保存为 HTML 文件: {save_path}")
+        print("✅ 提示：用浏览器打开此文件，即可拖拽旋转、缩放查看 3D 轨迹！")
+
+    def plot_attitude_comparison(self, save_path=None):
+        fig, axs = plt.subplots(3, 1, figsize=(10, 12))
+        fig.suptitle('Attitude Comparison: Roll, Pitch, Yaw (raw vs interpolate)', fontsize=14)
+
+        if self.original_data is not None:
+            time_orig = np.arange(len(self.original_data))
+            axs[0].plot(time_orig, self.original_data['roll'], label='Original Roll', color='blue')
+            axs[1].plot(time_orig, self.original_data['pitch'], label='Original Pitch', color='blue')
+            axs[2].plot(time_orig, self.original_data['yaw'], label='Original Yaw', color='blue')
+        if self.interpolated_data is not None:
+            time_interp = self.interpolated_data['timestamp']
+            axs[0].plot(time_interp, self.interpolated_data['roll'], label='Interp Roll', color='orange', linestyle='--')
+            axs[1].plot(time_interp, self.interpolated_data['pitch'], label='Interp Pitch', color='orange', linestyle='--')
+            axs[2].plot(time_interp, self.interpolated_data['yaw'], label='Interp Yaw', color='orange', linestyle='--')
+
+        titles = ['Roll [rad]', 'Pitch [rad]', 'Yaw [rad]']
+        for i, ax in enumerate(axs):
+            ax.set_ylabel(titles[i])
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+        axs[-1].set_xlabel('Time [s] (index or timestamp)')
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"📊 姿态对比图已保存至: {save_path}")
+        else:
+            plt.show()
+
+    def plot_velocity_acceleration(self, save_path=None):
+        if self.interpolated_data is None:
+            print("⚠️  无插值数据，跳过速度/加速度绘图")
             return
-            
-        print("\n=== Error Statistics ===")
-        print(f"X Direction Error - Mean: {stats['x_error_mean']:.6f}, Std: {stats['x_error_std']:.6f}")
-        print(f"Y Direction Error - Mean: {stats['y_error_mean']:.6f}, Std: {stats['y_error_std']:.6f}")
-        print(f"Magnitude Error - Mean: {stats['magnitude_error_mean']:.6f}, Std: {stats['magnitude_error_std']:.6f}")
-        print(f"Max Error: {stats['max_error']:.6f}")
-        print(f"Min Error: {stats['min_error']:.6f}")
-    
-    def plot_comparison(self, save_path=None):
-        """生成所有需要的对比图表"""
-        if self.original_data is None or self.smoothed_data is None:
-            print("错误: 请先加载数据")
-            return
-            
-        # 检查是否有插值数据
-        has_interpolated_data = self.interpolated_data is not None
-        
-        # 创建图形和子图
-        fig, axes = plt.subplots(2, 2, figsize=(16, 14))
-        fig.suptitle('trajectory compare', fontsize=16)
-        
-        # 清除NaN值
-        orig_clean = self.original_data.dropna()
-        smooth_clean = self.smoothed_data.dropna()
-        
-        # 确保数据长度一致
-        min_length = min(len(orig_clean), len(smooth_clean))
-        
-        # 1. 原轨迹与滤波轨迹对比
-        ax1 = axes[0, 0]
-        ax1.plot(orig_clean['x'][:min_length],
-                orig_clean['y'][:min_length],
-                'b-', label='Original', alpha=0.7, linewidth=2)
-        ax1.plot(smooth_clean['x_smooth'][:min_length],
-                smooth_clean['y_smooth'][:min_length],
-                'r-', label='Smoothed', alpha=0.7, linewidth=2)
-        
-        # 添加标记点以便更清晰地看到对应关系
-        ax1.scatter(orig_clean['x'][:min_length], orig_clean['y'][:min_length], 
-                   c='blue', s=30, alpha=0.5)
-        ax1.scatter(smooth_clean['x_smooth'][:min_length], smooth_clean['y_smooth'][:min_length], 
-                   c='red', s=30, alpha=0.5)
-        
-        ax1.set_xlabel('X')
-        ax1.set_ylabel('Y')
-        ax1.set_title('Original vs Smoothed Trajectory')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. 滤波轨迹与插值轨迹对比（如果有插值数据）
-        ax2 = axes[0, 1]
-        if has_interpolated_data:
-            interp_clean = self.interpolated_data.dropna()
-            
-            ax2.plot(smooth_clean['x_smooth'][:min_length],
-                    smooth_clean['y_smooth'][:min_length],
-                    'r-', label='Smoothed', alpha=0.7, linewidth=2)
-            ax2.scatter(smooth_clean['x_smooth'][:min_length], 
-                       smooth_clean['y_smooth'][:min_length], 
-                       c='red', s=30, alpha=0.5)
-            
-            # 绘制插值轨迹
-            ax2.plot(interp_clean['x'],
-                    interp_clean['y'],
-                    'b--', label='GP Interpolated', alpha=0.7, linewidth=1.85)
-            
-            ax2.set_xlabel('X')
-            ax2.set_ylabel('Y')
-            ax2.set_title('Smoothed vs GP Interpolated Trajectory')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
+
+        fig, axs = plt.subplots(4, 1, figsize=(12, 16))
+        fig.suptitle('Velocity, Acceleration, Angular Velocity, Angular Acceleration over Time', fontsize=14)
+
+        time = self.interpolated_data['timestamp']
+
+        axs[0].plot(time, self.interpolated_data['linear_velocity'], color='blue', label='Linear Velocity [m/s]')
+        axs[0].set_ylabel('Vel [m/s]')
+        axs[0].legend()
+        axs[0].grid(True, alpha=0.3)
+
+        axs[1].plot(time, self.interpolated_data['linear_acceleration'], color='red', label='Linear Accel [m/s²]')
+        axs[1].set_ylabel('Accel [m/s²]')
+        axs[1].legend()
+        axs[1].grid(True, alpha=0.3)
+
+        axs[2].plot(time, self.interpolated_data['angular_velocity'], color='green', label='Angular Vel [rad/s]')
+        axs[2].set_ylabel('Ang Vel [rad/s]')
+        axs[2].legend()
+        axs[2].grid(True, alpha=0.3)
+
+        axs[3].plot(time, self.interpolated_data['angular_acceleration'], color='purple', label='Angular Accel [rad/s²]')
+        axs[3].set_ylabel('Ang Accel [rad/s²]')
+        axs[3].legend()
+        axs[3].grid(True, alpha=0.3)
+        axs[3].set_xlabel('Time [s]')
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"📊 速度/加速度图已保存至: {save_path}")
         else:
-            ax2.text(0.5, 0.5, 'No interpolation data', transform=ax2.transAxes,
-                    ha='center', va='center', fontsize=12)
-            ax2.set_title('Smoothed vs GP Interpolated Trajectory')
-        
-        # 3. 速度曲线（如果有插值数据）
-        ax3 = axes[1, 0]
-        if has_interpolated_data:
-            interp_clean = self.interpolated_data.dropna()
-            
-            ax3.plot(interp_clean['timestamp'],
-                    interp_clean['velocity'],
-                    'b-', alpha=0.7, linewidth=2)
-            
-            ax3.set_xlabel('Time (s)')
-            ax3.set_ylabel('Velocity (m/s)')
-            ax3.set_title('GP Interpolated Velocity Profile')
-            ax3.grid(True, alpha=0.3)
-            
-            # 优化坐标轴范围
-            y_min, y_max = interp_clean['velocity'].min(), interp_clean['velocity'].max()
-            ax3.set_ylim(max(0, y_min - 0.1), y_max + 0.1)
-        else:
-            ax3.text(0.5, 0.5, 'No interpolation data', transform=ax3.transAxes,
-                    ha='center', va='center', fontsize=12)
-            ax3.set_title('GP Interpolated Velocity Profile')
-        
-        # 4. 加速度曲线（如果有插值数据）
-        ax4 = axes[1, 1]
-        if has_interpolated_data:
-            interp_clean = self.interpolated_data.dropna()
-            
-            ax4.plot(interp_clean['timestamp'],
-                    interp_clean['acceleration'],
-                    'orange', alpha=0.7, linewidth=2)
-            
-            ax4.set_xlabel('Time (s)')
-            ax4.set_ylabel('Acceleration (m/s²)')
-            ax4.set_title('GP Interpolated Acceleration Profile')
-            ax4.grid(True, alpha=0.3)
-            
-            # 优化坐标轴范围
-            y_min, y_max = interp_clean['acceleration'].min(), interp_clean['acceleration'].max()
-            ax4.set_ylim(max(0, y_min - 0.1), y_max + 0.1)
-        else:
-            ax4.text(0.5, 0.5, 'No interpolation data', transform=ax4.transAxes,
-                    ha='center', va='center', fontsize=12)
-            ax4.set_title('GP Interpolated Acceleration Profile')
-        
-        plt.tight_layout(rect=[0, 0, 1, 0.96])  # 为suptitle留出空间
-        
-        # 保存图像
-        if not save_path:
-            save_path = 'trajectory_comparison.png'
-        
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"图表已保存至: {save_path}")
-        print("注意: 图表已保存为图像文件，请查看生成的图像")
-    
-    def run_comparison(self, original_file, smoothed_file, interpolated_file=None, save_plot=None):
-        """运行完整的对比分析"""
-        print("开始轨迹数据对比分析...")
-        
-        # 加载数据
+            plt.show()
+
+    def run_comparison(self, original_file, smoothed_file, interpolated_file=None, save_dir='./plots'):
+        print("🚀 开始 6DOF 轨迹数据对比分析...")
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+
         if not self.load_data(original_file, smoothed_file, interpolated_file):
             return False
-        
-        # 计算统计信息
-        stats = self.calculate_statistics()
-        self.print_statistics(stats)
-        
-        # 绘制对比图表
-        self.plot_comparison(save_plot)
-        
-        print("对比分析完成!")
+
+        # === 1. 3D 轨迹对比图
+        self.plot_3d_trajectories_interactive(save_path=f"{save_dir}/3d_trajectory_comparison.html")
+
+        # === 2. 姿态对比图
+        self.plot_attitude_comparison(save_path=f"{save_dir}/attitude_comparison.png")
+
+        # === 3. 速度 / 加速度 / 角速度 / 角加速度
+        self.plot_velocity_acceleration(save_path=f"{save_dir}/velocity_acceleration_comparison.png")
+
+        print("✅ 对比分析完成！所有图表已保存至:", save_dir)
         return True
 
 
 def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description='轨迹数据对比工具')
+    parser = argparse.ArgumentParser(description='6DOF 轨迹数据对比工具（支持3D轨迹、姿态、速度、加速度）')
     parser.add_argument('--original', '-o', default='data/trajectory.csv',
-                       help='原始轨迹数据文件路径')
+                       help='原始轨迹数据文件路径（包含 x,y,z,roll,pitch,yaw,...）')
     parser.add_argument('--smoothed', '-s', default='output/smoothed_trajectory.csv',
                        help='滤波后轨迹数据文件路径')
     parser.add_argument('--interpolated', '-i', default='output/interpolated_trajectory.csv',
                        help='插值后轨迹数据文件路径')
-    parser.add_argument('--save-plot', '-p',
-                       help='图表保存路径')
-    
+    parser.add_argument('--save-dir', '-d', default='./plots',
+                       help='图表保存目录')
+
     args = parser.parse_args()
-    
-    # 检查文件是否存在
-    for file_path in [args.original, args.smoothed]:
-        if not Path(file_path).exists():
-            print(f"错误: 文件不存在: {file_path}")
-            sys.exit(1)
-    
-    if args.interpolated and not Path(args.interpolated).exists():
-        print(f"警告: 插值数据文件不存在: {args.interpolated}")
-        args.interpolated = None
-    
-    # 创建比较器并运行分析
+
     comparator = TrajectoryComparator()
     comparator.run_comparison(
         original_file=args.original,
         smoothed_file=args.smoothed,
         interpolated_file=args.interpolated,
-        save_plot=args.save_plot
+        save_dir=args.save_dir
     )
 
 

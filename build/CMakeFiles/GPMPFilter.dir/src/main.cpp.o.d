@@ -979,6 +979,19 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: \
  /usr/local/include/gtsam/linear/SubgraphBuilder.h \
  /usr/local/include/gtsam/nonlinear/LevenbergMarquardtParams.h \
  /usr/local/include/gtsam/slam/PriorFactor.h \
+ /usr/local/include/gtsam/geometry/Point3.h \
+ /usr/local/include/gtsam/base/VectorSerialization.h \
+ /usr/local/include/gtsam/geometry/Pose3.h \
+ /usr/local/include/gtsam/geometry/BearingRange.h \
+ /usr/local/include/gtsam/geometry/Rot3.h \
+ /usr/local/include/gtsam/geometry/Unit3.h \
+ /usr/local/include/gtsam/geometry/Quaternion.h \
+ /usr/local/include/gtsam/geometry/SO3.h \
+ /usr/local/include/gtsam/geometry/Kernel.h \
+ /usr/local/include/gtsam/geometry/SOn.h \
+ /usr/local/include/gtsam/base/MatrixLieGroup.h \
+ /usr/local/include/gtsam/base/make_shared.h \
+ /usr/local/include/gtsam/geometry/SOn-inl.h \
  /home/chen/Documents/GPMPFilter/include/GPFactor.h \
  /home/chen/Documents/GPMPFilter/include/MeasurementFactor.h \
  /home/chen/Documents/GPMPFilter/include/VelocityConstraint.h \

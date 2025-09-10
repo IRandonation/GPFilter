@@ -42,10 +42,10 @@ gtsam::Matrix GPInterpolator::buildCovarianceMatrix(const std::vector<double>& t
 }
 
 // GP后验估计：计算任意时间点t的状态估计
-gtsam::Vector4 GPInterpolator::gpPosteriorEstimate(
-    double t, 
+Vector12 GPInterpolator::gpPosteriorEstimate(
+    double t,
     const std::vector<double>& originalTimes,
-    const std::vector<gtsam::Vector4>& originalStates,
+    const std::vector<Vector12>& originalStates,
     const gtsam::Matrix& KXX_inv) const {
     
     int n = originalTimes.size();
@@ -59,9 +59,9 @@ gtsam::Vector4 GPInterpolator::gpPosteriorEstimate(
     // 计算权重向量：K(x,X) * K(X,X)^{-1}
     gtsam::Vector weights = KXX_inv * k;
     
-    // 对状态的4个维度（x, y, vx, vy）分别进行估计
-    gtsam::Vector4 result = gtsam::Vector4::Zero();
-    for (int dim = 0; dim < 4; ++dim) {
+    // 对状态的12个维度（x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw）分别进行估计
+    Vector12 result = Vector12::Zero(12);
+    for (int dim = 0; dim < 12; ++dim) {
         // 构建该维度的观测向量
         gtsam::Vector y(n);
         for (int i = 0; i < n; ++i) {
@@ -75,10 +75,10 @@ gtsam::Vector4 GPInterpolator::gpPosteriorEstimate(
 }
 
 // 插值主函数：保持原有输入输出格式
-std::vector<gtsam::Vector4> GPInterpolator::interpolate(
-    const std::vector<gtsam::Vector4>& originalTrajectory) {
+std::vector<Vector12> GPInterpolator::interpolate(
+    const std::vector<Vector12>& originalTrajectory) {
     
-    std::vector<gtsam::Vector4> interpolatedTrajectory;
+    std::vector<Vector12> interpolatedTrajectory;
     
     if (originalTrajectory.empty()) {
         return interpolatedTrajectory;
@@ -112,7 +112,7 @@ std::vector<gtsam::Vector4> GPInterpolator::interpolate(
     
     // 对每个插值时间点进行估计
     for (double t : interpolatedTimes) {
-        gtsam::Vector4 state = gpPosteriorEstimate(t, originalTimes, originalTrajectory, KXX_inv);
+        Vector12 state = gpPosteriorEstimate(t, originalTimes, originalTrajectory, KXX_inv);
         interpolatedTrajectory.push_back(state);
     }
     

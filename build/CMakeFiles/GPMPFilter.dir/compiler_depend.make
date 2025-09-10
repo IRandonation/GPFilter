@@ -1275,7 +1275,65 @@ CMakeFiles/GPMPFilter.dir/src/VelocityEstimator.cpp.o: ../src/VelocityEstimator.
   /usr/include/boost/serialization/detail/stack_constructor.hpp \
   /usr/include/boost/aligned_storage.hpp \
   /usr/include/boost/type_traits/aligned_storage.hpp \
-  /usr/include/boost/serialization/detail/is_default_constructible.hpp
+  /usr/include/boost/serialization/detail/is_default_constructible.hpp \
+  /usr/local/include/gtsam/geometry/Point3.h \
+  /usr/local/include/gtsam/base/VectorSerialization.h \
+  /usr/include/boost/serialization/array.hpp \
+  /usr/include/boost/serialization/array_wrapper.hpp \
+  /usr/include/boost/serialization/split_member.hpp \
+  /usr/include/boost/serialization/collection_size_type.hpp \
+  /usr/include/boost/serialization/array_optimization.hpp \
+  /usr/include/boost/mpl/always.hpp \
+  /usr/include/boost/mpl/aux_/preprocessor/default_params.hpp \
+  /usr/include/boost/mpl/aux_/arity_spec.hpp \
+  /usr/include/boost/mpl/apply.hpp \
+  /usr/include/boost/mpl/apply_fwd.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/apply_fwd.hpp \
+  /usr/include/boost/mpl/placeholders.hpp \
+  /usr/include/boost/mpl/arg.hpp \
+  /usr/include/boost/mpl/arg_fwd.hpp \
+  /usr/include/boost/mpl/aux_/na_assert.hpp \
+  /usr/include/boost/mpl/aux_/arg_typedef.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/arg.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/placeholders.hpp \
+  /usr/include/boost/mpl/lambda.hpp \
+  /usr/include/boost/mpl/bind.hpp \
+  /usr/include/boost/mpl/bind_fwd.hpp \
+  /usr/include/boost/mpl/aux_/config/bind.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/bind_fwd.hpp \
+  /usr/include/boost/mpl/next.hpp \
+  /usr/include/boost/mpl/next_prior.hpp \
+  /usr/include/boost/mpl/aux_/common_name_wknd.hpp \
+  /usr/include/boost/mpl/protect.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/bind.hpp \
+  /usr/include/boost/mpl/aux_/full_lambda.hpp \
+  /usr/include/boost/mpl/quote.hpp \
+  /usr/include/boost/mpl/aux_/has_type.hpp \
+  /usr/include/boost/mpl/aux_/config/bcc.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/quote.hpp \
+  /usr/include/boost/mpl/aux_/template_arity.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/template_arity.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/full_lambda.hpp \
+  /usr/include/boost/mpl/aux_/preprocessed/gcc/apply.hpp \
+  /usr/include/boost/type_traits/remove_const.hpp \
+  /usr/include/c++/11/numeric \
+  /usr/include/c++/11/bits/stl_numeric.h \
+  /usr/include/c++/11/pstl/glue_numeric_defs.h \
+  /usr/local/include/gtsam/geometry/Pose3.h \
+  /usr/local/include/gtsam/geometry/BearingRange.h \
+  /usr/local/include/gtsam/geometry/Rot3.h \
+  /usr/local/include/gtsam/geometry/Unit3.h \
+  /usr/include/c++/11/random \
+  /usr/include/c++/11/bits/random.h \
+  /usr/include/x86_64-linux-gnu/c++/11/bits/opt_random.h \
+  /usr/include/c++/11/bits/random.tcc \
+  /usr/local/include/gtsam/geometry/Quaternion.h \
+  /usr/local/include/gtsam/geometry/SO3.h \
+  /usr/local/include/gtsam/geometry/Kernel.h \
+  /usr/local/include/gtsam/geometry/SOn.h \
+  /usr/local/include/gtsam/base/MatrixLieGroup.h \
+  /usr/local/include/gtsam/base/make_shared.h \
+  /usr/local/include/gtsam/geometry/SOn-inl.h
 
 CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
   /usr/include/stdc-predef.h \
@@ -2343,6 +2401,19 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
   /usr/local/include/gtsam/linear/SubgraphBuilder.h \
   /usr/local/include/gtsam/nonlinear/LevenbergMarquardtParams.h \
   /usr/local/include/gtsam/slam/PriorFactor.h \
+  /usr/local/include/gtsam/geometry/Point3.h \
+  /usr/local/include/gtsam/base/VectorSerialization.h \
+  /usr/local/include/gtsam/geometry/Pose3.h \
+  /usr/local/include/gtsam/geometry/BearingRange.h \
+  /usr/local/include/gtsam/geometry/Rot3.h \
+  /usr/local/include/gtsam/geometry/Unit3.h \
+  /usr/local/include/gtsam/geometry/Quaternion.h \
+  /usr/local/include/gtsam/geometry/SO3.h \
+  /usr/local/include/gtsam/geometry/Kernel.h \
+  /usr/local/include/gtsam/geometry/SOn.h \
+  /usr/local/include/gtsam/base/MatrixLieGroup.h \
+  /usr/local/include/gtsam/base/make_shared.h \
+  /usr/local/include/gtsam/geometry/SOn-inl.h \
   ../include/GPFactor.h \
   ../include/MeasurementFactor.h \
   ../include/VelocityConstraint.h \
@@ -2374,8 +2445,6 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 /usr/local/include/gtsam/nonlinear/PriorFactor.h:
 
 /usr/local/include/gtsam/nonlinear/GraphvizFormatting.h:
-
-/usr/include/c++/11/numeric:
 
 /usr/local/include/gtsam/base/utilities.h:
 
@@ -2497,40 +2566,6 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/local/include/gtsam/linear/VectorValues.h:
 
-/usr/include/boost/mpl/aux_/preprocessed/gcc/template_arity.hpp:
-
-/usr/include/boost/mpl/aux_/full_lambda.hpp:
-
-/usr/include/boost/mpl/aux_/preprocessed/gcc/bind.hpp:
-
-/usr/include/boost/mpl/next_prior.hpp:
-
-/usr/include/boost/mpl/aux_/preprocessed/gcc/bind_fwd.hpp:
-
-/usr/include/boost/type_traits/remove_bounds.hpp:
-
-/usr/include/boost/mpl/aux_/config/bind.hpp:
-
-/usr/include/boost/mpl/bind_fwd.hpp:
-
-/usr/include/boost/mpl/lambda.hpp:
-
-/usr/include/boost/mpl/aux_/preprocessed/gcc/placeholders.hpp:
-
-/usr/include/boost/mpl/aux_/na_assert.hpp:
-
-/usr/include/boost/mpl/aux_/preprocessed/gcc/apply_fwd.hpp:
-
-/usr/include/boost/mpl/apply_fwd.hpp:
-
-/usr/include/boost/mpl/aux_/arity_spec.hpp:
-
-/usr/include/boost/mpl/aux_/preprocessor/default_params.hpp:
-
-/usr/include/boost/serialization/split_member.hpp:
-
-/usr/include/boost/serialization/array_wrapper.hpp:
-
 /usr/local/include/gtsam/discrete/DiscreteKey.h:
 
 /usr/local/include/gtsam/nonlinear/Values-inl.h:
@@ -2557,8 +2592,6 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/boost/utility/enable_if.hpp:
 
-/usr/include/boost/serialization/collection_size_type.hpp:
-
 /usr/include/boost/serialization/list.hpp:
 
 /usr/local/include/gtsam/base/FastList.h:
@@ -2575,15 +2608,63 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/c++/11/ratio:
 
-/usr/include/boost/mpl/protect.hpp:
-
-/usr/include/c++/11/chrono:
-
 /usr/include/boost/type_traits/add_pointer.hpp:
 
 /usr/include/x86_64-linux-gnu/c++/11/bits/c++io.h:
 
 /usr/include/c++/11/fstream:
+
+/usr/local/include/gtsam/geometry/SOn-inl.h:
+
+/usr/local/include/gtsam/base/make_shared.h:
+
+/usr/local/include/gtsam/base/MatrixLieGroup.h:
+
+/usr/local/include/gtsam/geometry/SO3.h:
+
+/usr/local/include/gtsam/geometry/Quaternion.h:
+
+/usr/include/c++/11/numeric:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/template_arity.hpp:
+
+/usr/include/boost/mpl/aux_/full_lambda.hpp:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/bind.hpp:
+
+/usr/include/c++/11/chrono:
+
+/usr/include/boost/mpl/protect.hpp:
+
+/usr/include/boost/mpl/next_prior.hpp:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/bind_fwd.hpp:
+
+/usr/include/boost/type_traits/remove_bounds.hpp:
+
+/usr/include/boost/mpl/aux_/config/bind.hpp:
+
+/usr/include/boost/mpl/bind_fwd.hpp:
+
+/usr/include/boost/mpl/lambda.hpp:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/placeholders.hpp:
+
+/usr/include/boost/mpl/aux_/na_assert.hpp:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/apply_fwd.hpp:
+
+/usr/include/boost/mpl/apply_fwd.hpp:
+
+/usr/include/boost/mpl/aux_/arity_spec.hpp:
+
+/usr/include/boost/mpl/aux_/preprocessor/default_params.hpp:
+
+/usr/include/boost/serialization/collection_size_type.hpp:
+
+/usr/include/boost/serialization/split_member.hpp:
+
+/usr/include/boost/serialization/array_wrapper.hpp:
 
 /usr/include/boost/serialization/detail/is_default_constructible.hpp:
 
@@ -2661,9 +2742,9 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/boost/mpl/aux_/config/arrays.hpp:
 
-/usr/include/c++/11/bits/random.h:
-
 /usr/include/eigen3/Eigen/src/SparseCore/SparseSolverBase.h:
+
+/usr/include/c++/11/bits/random.h:
 
 /usr/include/boost/mpl/aux_/has_apply.hpp:
 
@@ -2727,9 +2808,9 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/boost/core/first_scalar.hpp:
 
-/usr/include/boost/serialization/array.hpp:
-
 /usr/include/eigen3/Eigen/Sparse:
+
+/usr/include/boost/serialization/array.hpp:
 
 /usr/include/boost/core/pointer_traits.hpp:
 
@@ -2908,6 +2989,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 /usr/include/boost/type_traits/is_class.hpp:
 
 /usr/include/boost/config/abi_prefix.hpp:
+
+/usr/local/include/gtsam/base/VectorSerialization.h:
 
 /usr/include/boost/archive/detail/abi_prefix.hpp:
 
@@ -3253,6 +3336,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/x86_64-linux-gnu/bits/mathcalls-helper-functions.h:
 
+/usr/local/include/gtsam/geometry/Rot3.h:
+
 /usr/include/x86_64-linux-gnu/bits/types/error_t.h:
 
 /usr/include/eigen3/Eigen/Eigenvalues:
@@ -3304,6 +3389,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 /usr/include/boost/mpl/equal_to.hpp:
 
 /usr/include/boost/config/detail/select_stdlib_config.hpp:
+
+/usr/local/include/gtsam/geometry/Pose3.h:
 
 /usr/include/c++/11/bits/locale_classes.tcc:
 
@@ -3645,6 +3732,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/boost/preprocessor/facilities/empty.hpp:
 
+/usr/local/include/gtsam/geometry/BearingRange.h:
+
 /usr/include/boost/smart_ptr/make_shared_object.hpp:
 
 /usr/include/c++/11/bits/cxxabi_init_exception.h:
@@ -3665,15 +3754,17 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 
 /usr/include/x86_64-linux-gnu/bits/types/wint_t.h:
 
+/usr/local/include/gtsam/geometry/Unit3.h:
+
 /usr/include/boost/type_traits/conditional.hpp:
 
 /usr/include/x86_64-linux-gnu/bits/types/mbstate_t.h:
 
 /usr/local/include/gtsam/inference/Factor.h:
 
-/usr/include/boost/mpl/aux_/has_type.hpp:
-
 /usr/include/boost/type_traits/remove_const.hpp:
+
+/usr/include/boost/mpl/aux_/has_type.hpp:
 
 /usr/include/boost/core/noinit_adaptor.hpp:
 
@@ -3706,6 +3797,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 /usr/include/boost/type_traits/detail/config.hpp:
 
 /usr/include/boost/concept/assert.hpp:
+
+/usr/local/include/gtsam/geometry/Kernel.h:
 
 /usr/include/boost/preprocessor/facilities/identity.hpp:
 
@@ -3764,6 +3857,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 /usr/include/time.h:
 
 /usr/include/boost/preprocessor/slot/detail/def.hpp:
+
+/usr/local/include/gtsam/geometry/SOn.h:
 
 /usr/include/x86_64-linux-gnu/bits/pthreadtypes-arch.h:
 
@@ -3864,6 +3959,8 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: ../src/main.cpp \
 /usr/include/c++/11/bits/ostream.tcc:
 
 /usr/include/eigen3/Eigen/src/Core/util/ForwardDeclarations.h:
+
+/usr/local/include/gtsam/geometry/Point3.h:
 
 /usr/include/boost/preprocessor/arithmetic/add.hpp:
 

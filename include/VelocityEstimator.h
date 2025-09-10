@@ -3,7 +3,12 @@
 
 #include <vector>
 #include <gtsam/geometry/Point2.h>
+#include <gtsam/geometry/Point3.h>
+#include <gtsam/geometry/Pose3.h>
 #include <gtsam/base/Vector.h>
+
+// 定义12维状态向量类型: [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw]
+using Vector12 = gtsam::Vector;
 
 /**
  * 速度估计器类
@@ -32,11 +37,11 @@ public:
 
     /**
      * 估计整个轨迹的速度
-     * @param positions 位置点序列
-     * @return 包含位置和估计速度的状态向量序列
+     * @param poses 位姿序列
+     * @return 包含位置、姿态和估计速度的状态向量序列（12维）
      */
-    std::vector<gtsam::Vector4> estimateVelocities(
-        const std::vector<gtsam::Point2>& positions);
+    std::vector<Vector12> estimateVelocities(
+        const std::vector<gtsam::Pose3>& poses);
 
     /**
      * 设置估计方法
@@ -81,38 +86,38 @@ private:
 
     /**
      * 简单差分法估计速度
-     * @param positions 位置点序列
-     * @return 包含位置和估计速度的状态向量序列
+     * @param poses 位姿序列
+     * @return 包含位置、姿态和估计速度的状态向量序列（12维）
      */
-    std::vector<gtsam::Vector4> estimateWithSimpleDifference(
-        const std::vector<gtsam::Point2>& positions);
+    std::vector<Vector12> estimateWithSimpleDifference(
+        const std::vector<gtsam::Pose3>& poses);
 
     /**
      * 基于匀速模型估计速度
-     * @param positions 位置点序列
-     * @return 包含位置和估计速度的状态向量序列
+     * @param poses 位姿序列
+     * @return 包含位置、姿态和估计速度的状态向量序列（12维）
      */
-    std::vector<gtsam::Vector4> estimateWithConstantVelocity(
-        const std::vector<gtsam::Point2>& positions);
+    std::vector<Vector12> estimateWithConstantVelocity(
+        const std::vector<gtsam::Pose3>& poses);
 
     /**
      * 基于卡尔曼滤波估计速度
-     * @param positions 位置点序列
-     * @return 包含位置和估计速度的状态向量序列
+     * @param poses 位姿序列
+     * @return 包含位置、姿态和估计速度的状态向量序列（12维）
      */
-    std::vector<gtsam::Vector4> estimateWithKalmanFilter(
-        const std::vector<gtsam::Point2>& positions);
+    std::vector<Vector12> estimateWithKalmanFilter(
+        const std::vector<gtsam::Pose3>& poses);
 
     /**
      * 使用最小二乘法拟合局部匀速模型
-     * @param positions 局部位置点序列
+     * @param poses 局部位姿序列
      * @param startIndex 起始索引
      * @param endIndex 结束索引
-     * @return 估计的速度 (vx, vy)
+     * @return 估计的速度 (vx, vy, vz, vroll, vpitch, vyaw)
      */
-    gtsam::Vector2 fitLocalConstantVelocity(
-        const std::vector<gtsam::Point2>& positions,
-        int startIndex, 
+    Vector12 fitLocalConstantVelocity(
+        const std::vector<gtsam::Pose3>& poses,
+        int startIndex,
         int endIndex);
 
     /**
@@ -121,7 +126,7 @@ private:
      * @param weights 权重序列
      * @return 加权平均速度
      */
-    gtsam::Vector2 computeWeightedAverageVelocity(
-        const std::vector<gtsam::Vector2>& velocities,
+    Vector12 computeWeightedAverageVelocity(
+        const std::vector<Vector12>& velocities,
         const std::vector<double>& weights);
 };
