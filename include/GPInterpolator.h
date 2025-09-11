@@ -3,8 +3,8 @@
 #include <vector>
 #include <gtsam/base/Matrix.h>
 
-// 前向声明12维状态向量类型
-using Vector12 = gtsam::Vector;
+// 前向声明6维状态向量类型
+using Vector6 = gtsam::Vector;
 
 class GPInterpolator {
 private:
@@ -22,10 +22,10 @@ private:
     gtsam::Matrix buildCovarianceMatrix(const std::vector<double>& times) const;
 
     // GP后验估计
-    Vector12 gpPosteriorEstimate(
+    Vector6 gpPosteriorEstimate(
         double t,
         const std::vector<double>& originalTimes,
-        const std::vector<Vector12>& originalStates,
+        const std::vector<Vector6>& originalStates,
         const gtsam::Matrix& KXX_inv) const;
 
 public:
@@ -33,8 +33,8 @@ public:
     GPInterpolator(double dt, int interpolationFactor);
 
     // 执行GP插值（保持原有接口）
-    std::vector<Vector12> interpolate(
-        const std::vector<Vector12>& originalTrajectory);
+    std::vector<Vector6> interpolate(
+        const std::vector<Vector6>& originalTrajectory);
 
     // 设置插值因子
     void setInterpolationFactor(int factor);

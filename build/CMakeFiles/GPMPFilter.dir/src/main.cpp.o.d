@@ -994,7 +994,4 @@ CMakeFiles/GPMPFilter.dir/src/main.cpp.o: \
  /usr/local/include/gtsam/geometry/SOn-inl.h \
  /home/chen/Documents/GPMPFilter/include/GPFactor.h \
  /home/chen/Documents/GPMPFilter/include/MeasurementFactor.h \
- /home/chen/Documents/GPMPFilter/include/VelocityConstraint.h \
- /home/chen/Documents/GPMPFilter/include/AccelerationConstraint.h \
- /home/chen/Documents/GPMPFilter/include/GPInterpolator.h \
- /home/chen/Documents/GPMPFilter/include/VelocityEstimator.h
+ /home/chen/Documents/GPMPFilter/include/GPInterpolator.h

@@ -153,30 +153,6 @@ src/GPInterpolator.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/GPInterpolator.cpp.s
 .PHONY : src/GPInterpolator.cpp.s
 
-src/VelocityEstimator.o: src/VelocityEstimator.cpp.o
-.PHONY : src/VelocityEstimator.o
-
-# target to build an object file
-src/VelocityEstimator.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/VelocityEstimator.cpp.o
-.PHONY : src/VelocityEstimator.cpp.o
-
-src/VelocityEstimator.i: src/VelocityEstimator.cpp.i
-.PHONY : src/VelocityEstimator.i
-
-# target to preprocess a source file
-src/VelocityEstimator.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/VelocityEstimator.cpp.i
-.PHONY : src/VelocityEstimator.cpp.i
-
-src/VelocityEstimator.s: src/VelocityEstimator.cpp.s
-.PHONY : src/VelocityEstimator.s
-
-# target to generate assembly for a file
-src/VelocityEstimator.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/GPMPFilter.dir/build.make CMakeFiles/GPMPFilter.dir/src/VelocityEstimator.cpp.s
-.PHONY : src/VelocityEstimator.cpp.s
-
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
@@ -213,9 +189,6 @@ help:
 	@echo "... src/GPInterpolator.o"
 	@echo "... src/GPInterpolator.i"
 	@echo "... src/GPInterpolator.s"
-	@echo "... src/VelocityEstimator.o"
-	@echo "... src/VelocityEstimator.i"
-	@echo "... src/VelocityEstimator.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"

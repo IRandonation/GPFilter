@@ -10,7 +10,7 @@ GPInterpolator::GPInterpolator(double dt, int interpolationFactor)
     : dt_(dt), interpolationFactor_(interpolationFactor) {
     interpolatedDt_ = dt_ / interpolationFactor_;
     lengthScale_ = dt_;  // 默认特征长度为原始时间间隔，平衡平滑性与跟踪性
-    noiseSigma_ = 0.01;  // 默认观测噪声较小，保证与原始轨迹接近
+    noiseSigma_ = 0.00;  // 默认观测噪声较小，保证与原始轨迹接近
     inv_lengthScale_sq_ = 1.0 / (lengthScale_ * lengthScale_);
 }
 
@@ -42,10 +42,10 @@ gtsam::Matrix GPInterpolator::buildCovarianceMatrix(const std::vector<double>& t
 }
 
 // GP后验估计：计算任意时间点t的状态估计
-Vector12 GPInterpolator::gpPosteriorEstimate(
+Vector6 GPInterpolator::gpPosteriorEstimate(
     double t,
     const std::vector<double>& originalTimes,
-    const std::vector<Vector12>& originalStates,
+    const std::vector<Vector6>& originalStates,
     const gtsam::Matrix& KXX_inv) const {
     
     int n = originalTimes.size();
@@ -59,9 +59,9 @@ Vector12 GPInterpolator::gpPosteriorEstimate(
     // 计算权重向量：K(x,X) * K(X,X)^{-1}
     gtsam::Vector weights = KXX_inv * k;
     
-    // 对状态的12个维度（x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw）分别进行估计
-    Vector12 result = Vector12::Zero(12);
-    for (int dim = 0; dim < 12; ++dim) {
+    // 对状态的6个维度（x, y, z, roll, pitch, yaw）分别进行估计
+    Vector6 result = Vector6::Zero(6);
+    for (int dim = 0; dim < 6; ++dim) {
         // 构建该维度的观测向量
         gtsam::Vector y(n);
         for (int i = 0; i < n; ++i) {
@@ -75,49 +75,73 @@ Vector12 GPInterpolator::gpPosteriorEstimate(
 }
 
 // 插值主函数：保持原有输入输出格式
-std::vector<Vector12> GPInterpolator::interpolate(
-    const std::vector<Vector12>& originalTrajectory) {
+std::vector<Vector6> GPInterpolator::interpolate(
+    const std::vector<Vector6>& originalTrajectory) {
     
-    std::vector<Vector12> interpolatedTrajectory;
-    
+    std::vector<Vector6> interpolatedTrajectory;
     if (originalTrajectory.empty()) {
         return interpolatedTrajectory;
     }
-    
-    // 为原始轨迹分配时间戳（0, dt, 2*dt, ...）
+
+    // 原始轨迹时间戳
     std::vector<double> originalTimes;
     for (size_t i = 0; i < originalTrajectory.size(); ++i) {
         originalTimes.push_back(i * dt_);
     }
-    
-    // 生成插值时间点序列
+
+    // 插值时间戳：插值点 + 原始点（保证端点精确对齐）
     std::vector<double> interpolatedTimes;
     double totalTime = (originalTrajectory.size() - 1) * dt_;
-    for (double t = 0; t <= totalTime; t += interpolatedDt_) {
+    for (double t = 0; t <= totalTime + 1e-12; t += interpolatedDt_) {
         interpolatedTimes.push_back(t);
     }
-    
-    // 构建并求逆协方差矩阵（只计算一次，提高效率）
+    interpolatedTimes.insert(interpolatedTimes.end(), originalTimes.begin(), originalTimes.end());
+    std::sort(interpolatedTimes.begin(), interpolatedTimes.end());
+    interpolatedTimes.erase(std::unique(interpolatedTimes.begin(), interpolatedTimes.end()), interpolatedTimes.end());
+
+    // 构建协方差矩阵
     int n = originalTimes.size();
     gtsam::Matrix KXX = buildCovarianceMatrix(originalTimes);
-    // 对正定矩阵进行Cholesky分解（LDLT更稳定，支持数值扰动）
+
+    // Cholesky分解
     Eigen::LDLT<gtsam::Matrix> ldlt(KXX);
-    // 检查分解是否成功（处理数值问题）
     if (ldlt.info() != Eigen::Success) {
-        // 添加微小扰动确保正定（可选，根据实际场景调整）
-        KXX += Eigen::MatrixXd::Identity(n, n) * 1e-8;
+        KXX += Eigen::MatrixXd::Identity(n, n) * 1e-10;
         ldlt.compute(KXX);
     }
-    gtsam::Matrix KXX_inv = ldlt.solve(Eigen::MatrixXd::Identity(n, n));
-    
-    // 对每个插值时间点进行估计
+
+    // 预构建每个维度的观测向量 y[dim][i]
+    std::vector<gtsam::Vector> ys(6, gtsam::Vector(n));
+    for (int dim = 0; dim < 6; ++dim) {
+        for (int i = 0; i < n; ++i) {
+            ys[dim](i) = originalTrajectory[i](dim);
+        }
+    }
+
+    // 插值
+    interpolatedTrajectory.reserve(interpolatedTimes.size());
     for (double t : interpolatedTimes) {
-        Vector12 state = gpPosteriorEstimate(t, originalTimes, originalTrajectory, KXX_inv);
+        // 协方差向量 k
+        gtsam::Vector k(n);
+        for (int i = 0; i < n; ++i) {
+            k(i) = kernel(t, originalTimes[i]);
+        }
+
+        // 解方程 (更稳定，不显式求逆)
+        gtsam::Vector weights = ldlt.solve(k);
+
+        // 多维度插值
+        Vector6 state = Vector6::Zero(6);
+        for (int dim = 0; dim < 6; ++dim) {
+            state(dim) = weights.dot(ys[dim]);
+        }
+
         interpolatedTrajectory.push_back(state);
     }
-    
+
     return interpolatedTrajectory;
 }
+
 
 // 设置插值因子（保持原有接口）
 void GPInterpolator::setInterpolationFactor(int factor) {
