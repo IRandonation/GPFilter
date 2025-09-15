@@ -206,7 +206,7 @@ int main() {
     
     // 先验因子噪声：位置和姿态噪声
     auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(6) << 0.5, 0.5, 0.5, 0.5, 0.5, 0.5).finished());  // 位置姿态噪声
+        (gtsam::Vector(6) << 0.1, 0.1, 0.1, 0.5, 0.5, 0.5).finished());  // 位置姿态噪声
     
     // 起点/终点约束（先验因子）
     graph.add(gtsam::PriorFactor<Vector6>(0, measurements[0], prior_noise));
@@ -214,14 +214,14 @@ int main() {
     
     // GP过程因子（建模动力学连续性）
     auto gp_noise = gtsam::noiseModel::Diagonal::Sigmas(
-        (gtsam::Vector(6) << 1, 1, 0.1, 0.1, 0.1, 0.1).finished());  // 位置姿态约束中等
+        (gtsam::Vector(6) << 1, 1, 1, 1, 1, 1).finished());  // 位置姿态约束中等
     for (size_t i = 0; i < measurements.size()-1; ++i) {
         // 使用固定时间步长
         graph.add(std::make_shared<GPFactor>(i, i+1, dt, gp_noise));
     }
     
     // 测量因子（抑制观测噪声）
-    auto meas_noise = gtsam::noiseModel::Isotropic::Sigma(6, 2);  // 6维测量噪声（位置和姿态）
+    auto meas_noise = gtsam::noiseModel::Isotropic::Sigma(6, 1);  // 6维测量噪声（位置和姿态）
     for (size_t i = 1; i < measurements.size()-1; ++i) {
         gtsam::Point3 position(measurements[i][0], measurements[i][1], measurements[i][2]);
         gtsam::Rot3 rotation = gtsam::Rot3::Yaw(measurements[i][5]) *
