@@ -1,3 +1,0 @@
-/home/chen/Documents/GPMPFilter/build/CMakeFiles/GPMPFilter.dir
-/home/chen/Documents/GPMPFilter/build/CMakeFiles/edit_cache.dir
-/home/chen/Documents/GPMPFilter/build/CMakeFiles/rebuild_cache.dir
