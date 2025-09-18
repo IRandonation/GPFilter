@@ -59,27 +59,56 @@ class Trajectory3DComparator:
                     df[col] = 0.0  # 缺失的姿态角补0
 
             # 生成时间步（按数据索引，代表帧序列）
-            timesteps = np.arange(len(df))
-            return df[std_columns], timesteps  # 按标准顺序返回数据
+            # timesteps = np.arange(len(df))
+            # return df[std_columns], timesteps  # 按标准顺序返回数据
+            return df[std_columns]
 
         try:
             # 1. 加载原始数据
-            self.original_data, self.original_timesteps = load_data_core(original_file)
-            print(f"✅ 原始数据加载完成 | 数据点数: {len(self.original_data)} | 包含列: x,y,z,roll,pitch,yaw")
+            self.original_data = load_data_core(original_file)
+            self.original_data['timestamp'] = np.arange(len(self.original_data)) / 60.0 # 60Hz
+            print(f"✅ 原始数据加载完成 | 数据点数: {len(self.original_data)} | 包含列: x,y,z,roll,pitch,yaw,timestamp")
 
             # 2. 加载滤波数据
-            self.smoothed_data, self.smoothed_timesteps = load_data_core(smoothed_file)
-            print(f"✅ 滤波数据加载完成 | 数据点数: {len(self.smoothed_data)} | 包含列: x,y,z,roll,pitch,yaw")
+            self.smoothed_data = load_data_core(smoothed_file)
+            self.smoothed_data['timestamp'] = np.arange(len(self.smoothed_data)) / 60.0 # 60Hz
+            print(f"✅ 滤波数据加载完成 | 数据点数: {len(self.smoothed_data)} | 包含列: x,y,z,roll,pitch,yaw,timestamp")
 
             # 3. 加载插值数据
-            self.interpolated_data, self.interpolated_timesteps = load_data_core(interpolated_file)
-            print(f"✅ 插值数据加载完成 | 数据点数: {len(self.interpolated_data)} | 包含列: x,y,z,roll,pitch,yaw")
+            self.interpolated_data = load_data_core(interpolated_file)
+            self.interpolated_data['timestamp'] = np.arange(len(self.interpolated_data)) / 600.0 # 600Hz
+            print(f"✅ 插值数据加载完成 | 数据点数: {len(self.interpolated_data)} | 包含列: x,y,z,roll,pitch,yaw,timestamp")
 
             return True
 
         except Exception as e:
             print(f"❌ 数据加载失败: {str(e)}")
             return False
+
+    def _calculate_kinematics(self, df, freq):
+        """计算轨迹的速度和加速度"""
+        if df is None or len(df) < 2:
+            return None, None, None, None
+
+        # 确保数据按时间戳排序
+        df = df.sort_values(by='timestamp').reset_index(drop=True)
+
+        # 计算时间差
+        dt = 1.0 / freq
+
+        # 计算速度
+        vx = np.gradient(df['x'], dt)
+        vy = np.gradient(df['y'], dt)
+        vz = np.gradient(df['z'], dt)
+        velocity_magnitude = np.sqrt(vx**2 + vy**2 + vz**2)
+
+        # 计算加速度
+        ax = np.gradient(vx, dt)
+        ay = np.gradient(vy, dt)
+        az = np.gradient(vz, dt)
+        acceleration_magnitude = np.sqrt(ax**2 + ay**2 + az**2)
+
+        return velocity_magnitude, acceleration_magnitude, vx, vy, vz
 
     def plot_3d_trajectory_pair(self, data1, label1, data2, label2, title, save_path=None):
         """
@@ -131,6 +160,48 @@ class Trajectory3DComparator:
         else:
             plt.show()
 
+    def plot_kinematics_comparison(self, save_path=None):
+        """
+        速度和加速度对比（原始 vs 滤波 vs 插值）
+        """
+        # 计算运动学
+        orig_vel, orig_acc, _, _, _ = self._calculate_kinematics(self.original_data, 60)
+        smooth_vel, smooth_acc, _, _, _ = self._calculate_kinematics(self.smoothed_data, 60)
+        interp_vel, interp_acc, _, _, _ = self._calculate_kinematics(self.interpolated_data, 600)
+
+        fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True) # 2行1列，共享x轴
+        fig.suptitle("Velocity and Acceleration Profile Comparison", fontsize=14, fontweight="bold", y=0.95)
+
+        # 1. 速度曲线对比
+        ax1 = axes[0]
+        if orig_vel is not None: ax1.plot(self.original_data['timestamp'], orig_vel, 'b-', label='Original Velocity', alpha=0.7, linewidth=1.5)
+        if smooth_vel is not None: ax1.plot(self.smoothed_data['timestamp'], smooth_vel, 'r-', label='Smoothed Velocity', alpha=0.7, linewidth=1.5)
+        if interp_vel is not None: ax1.plot(self.interpolated_data['timestamp'], interp_vel, 'g--', label='Interpolated Velocity', alpha=0.7, linewidth=1.5)
+        ax1.set_ylabel('Velocity (m/s)', fontsize=11)
+        ax1.legend(fontsize=9, loc="upper right")
+        ax1.grid(True, linestyle="--", alpha=0.3)
+        ax1.set_title('Velocity Profile')
+
+        # 2. 加速度曲线对比
+        ax2 = axes[1]
+        if orig_acc is not None: ax2.plot(self.original_data['timestamp'], orig_acc, 'b-', label='Original Acceleration', alpha=0.7, linewidth=1.5)
+        if smooth_acc is not None: ax2.plot(self.smoothed_data['timestamp'], smooth_acc, 'r-', label='Smoothed Acceleration', alpha=0.7, linewidth=1.5)
+        if interp_acc is not None: ax2.plot(self.interpolated_data['timestamp'], interp_acc, 'g--', label='Interpolated Acceleration', alpha=0.7, linewidth=1.5)
+        ax2.set_xlabel('Time (s)', fontsize=11)
+        ax2.set_ylabel('Acceleration (m/s²)', fontsize=11)
+        ax2.legend(fontsize=9, loc="upper right")
+        ax2.grid(True, linestyle="--", alpha=0.3)
+        ax2.set_title('Acceleration Profile')
+
+        plt.subplots_adjust(left=0.08, right=0.95, top=0.9, bottom=0.08)
+
+        # 保存或显示
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight", facecolor="white")
+            print(f"📊 速度/加速度对比图已保存: {save_path}")
+        # else:
+        #     plt.show()
+
     def plot_rpy_comparison(self, save_path=None):
         """
         RPY姿态对比（处理插值数据10倍点数的情况）
@@ -157,12 +228,16 @@ class Trajectory3DComparator:
             ax = axes[i]
             
             # 原始数据（点数少，实线）
-            ax.plot(self.original_timesteps, self.original_data[col],
+            ax.plot(self.original_data['timestamp'], self.original_data[col],
                     color=color, linestyle="-", linewidth=1.5, alpha=0.9, label="Original")
             
+            # 滤波数据
+            ax.plot(self.smoothed_data['timestamp'], self.smoothed_data[col],
+                    color=color, linestyle="-", linewidth=1.5, alpha=0.9, label="Smoothed")
+
             # 插值数据（点数多10倍，虚线）
-            ax.plot(self.smoothed_timesteps, self.smoothed_data[col],
-                    color=color, linestyle="-.", linewidth=2.5, alpha=0.8, label="smoothed")
+            ax.plot(self.interpolated_data['timestamp'], self.interpolated_data[col],
+                    color=color, linestyle="--", linewidth=2.5, alpha=0.8, label="Interpolated")
 
             # 子图配置
             ax.set_ylabel(label, fontsize=11)
@@ -174,7 +249,7 @@ class Trajectory3DComparator:
             # ax.set_xlim(0, 1.0)
 
         # 最后一个子图添加x轴标签（归一化时间）
-        axes[-1].set_xlabel("Normalized Time (0 to 1.0)", fontsize=11)
+        axes[-1].set_xlabel("Time (s)", fontsize=11)
 
         plt.subplots_adjust(left=0.08, right=0.95, top=0.9, bottom=0.08)
         
@@ -182,8 +257,8 @@ class Trajectory3DComparator:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight", facecolor="white")
             print(f"📊 RPY对比图已保存: {save_path}")
-        else:
-            plt.show()
+        # else:
+        #     plt.show()
 
     def run_full_comparison(self, original_file, smoothed_file, interpolated_file, save_dir='./plots'):
         """
@@ -220,9 +295,14 @@ class Trajectory3DComparator:
             save_path=save_dir / "3d_original_vs_interpolated.png"
         )
 
-        # 3. 绘制RPY原始 vs 插值对比
+        # 3. 绘制RPY原始 vs 滤波 vs 插值对比
         self.plot_rpy_comparison(
             save_path=save_dir / "rpy_original_vs_interpolated.png"
+        )
+
+        # 4. 绘制速度和加速度对比
+        self.plot_kinematics_comparison(
+            save_path=save_dir / "kinematics_comparison.png"
         )
 
         print("\n🎉 所有3D轨迹与RPY对比图表生成完成！")
