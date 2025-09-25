@@ -370,7 +370,7 @@ class VelocityToPositionAnalyzer:
         self.plot_error_analysis(Path(output_dir) / "integration_error_analysis.png")
         
         # 5. 保存积分结果
-        self.save_integrated_data(Path(output_dir) / "velocity_integrated_results.csv")
+        # self.save_integrated_data(Path(output_dir) / "velocity_integrated_results.csv")
         
         print("\n🎉 速度积分分析完成！")
         return True

@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
     std::string csv_path = "../../data/trajectory.csv", out_path = "../../output/smoothed_trajectory.csv";
     // 调整参数以获得更平滑的速度和加速度
     // 减小 qvel 和 qacc，增大 r
-    double dt = 1.0/60.0, qpos = 1e-5, qvel = 1e-4, qacc = 1e-3, r = 1e-3; 
+    double dt = 1.0/60.0, qpos = 1e-5, qvel = 1e-3, qacc = 1e-2, r = 1e-4; 
     // if (!parse_args(argc, argv, csv_path, out_path, dt, qpos, qvel, qacc, r)) return 1;
 
     std::vector<Vec6> raw; raw.reserve(10000);
