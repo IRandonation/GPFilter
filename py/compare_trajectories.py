@@ -11,7 +11,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-plt.switch_backend('QtAgg')
+plt.switch_backend('Agg')
 from mpl_toolkits.mplot3d import Axes3D
 from pathlib import Path
 import argparse
@@ -34,81 +34,244 @@ class Trajectory3DComparator:
         self.original_timesteps = None
         self.interpolated_timesteps = None
 
-    def load_data(self, original_file, smoothed_file, interpolated_file):
+    def calculate_kinematics_from_position(self, data, dt=1/60.0):
         """
-        加载数据：要求CSV至少包含 x,y,z,roll,pitch,yaw 6列（3D轨迹需z轴，RPY需姿态角）
-        无列名时默认按顺序解析，缺失列补0（但核心x/y/z不可缺失）
+        从位置数据通过差分计算速度和加速度
+        :param data: 包含x,y,z位置的DataFrame
+        :param dt: 时间步长（秒）
+        :return: 包含计算出的速度和加速度的DataFrame副本
         """
-        def load_data_core(filepath):
-            # 读取CSV并处理数据类型
-            df = pd.read_csv(filepath, header=None)
-            df = df.apply(pd.to_numeric, errors='coerce')  # 无效值转为NaN
-            df = df.dropna(subset=[0, 1, 2])  # 必须保留x/y/z列（前3列），否则删除行
+        data_copy = data.copy()
+        
+        # 计算速度（位置的一阶差分）
+        data_copy['vx_diff'] = np.gradient(data['x'], dt)
+        data_copy['vy_diff'] = np.gradient(data['y'], dt)
+        data_copy['vz_diff'] = np.gradient(data['z'], dt)
+        
+        # 计算加速度（速度的一阶差分）
+        data_copy['ax_diff'] = np.gradient(data_copy['vx_diff'], dt)
+        data_copy['ay_diff'] = np.gradient(data_copy['vy_diff'], dt)
+        data_copy['az_diff'] = np.gradient(data_copy['vz_diff'], dt)
+        
+        return data_copy
 
-            # 检查核心列数（x/y/z为3D必需）
-            if df.shape[1] < 3:
-                raise ValueError(f"文件 {filepath} 列数不足！3D轨迹需至少x/y/z 3列，当前仅{df.shape[1]}列")
+    def integrate_velocity_to_position(self, data, dt=1/60.0, initial_position=None):
+        """
+        从速度数据通过积分计算位置
+        :param data: 包含vx,vy,vz速度的DataFrame
+        :param dt: 时间步长（秒）
+        :param initial_position: 初始位置 [x0, y0, z0]，如果为None，则从data中获取第一个位置
+        :return: 包含计算出的位置的DataFrame副本
+        """
+        data_copy = data.copy()
 
-            # 定义标准列名（按顺序匹配：x,y,z,roll,pitch,yaw）
-            std_columns = ['x', 'y', 'z', 'roll', 'pitch', 'yaw']
-            # 截取前6列（超出部分忽略），并补充缺失列（补0）
-            df = df.iloc[:, :6]
-            df.columns = std_columns[:df.shape[1]]
-            for col in std_columns:
-                if col not in df.columns:
-                    df[col] = 0.0  # 缺失的姿态角补0
+        if initial_position is None:
+            # 尝试从数据中获取初始位置，如果不存在则默认为0
+            x0 = data['x'].iloc[0] if 'x' in data.columns else 0.0
+            y0 = data['y'].iloc[0] if 'y' in data.columns else 0.0
+            z0 = data['z'].iloc[0] if 'z' in data.columns else 0.0
+        else:
+            x0, y0, z0 = initial_position
 
-            # 生成时间步（按数据索引，代表帧序列）
-            # timesteps = np.arange(len(df))
-            # return df[std_columns], timesteps  # 按标准顺序返回数据
-            return df[std_columns]
+        # 积分速度得到位置
+        data_copy['x_int'] = x0 + (data['vx'].cumsum() - data['vx'].iloc[0]) * dt
+        data_copy['y_int'] = y0 + (data['vy'].cumsum() - data['vy'].iloc[0]) * dt
+        data_copy['z_int'] = z0 + (data['vz'].cumsum() - data['vz'].iloc[0]) * dt
+
+        return data_copy
+
+    def load_data(self, original_file=None, smoothed_file=None, interpolated_file=None):
+        """
+        加载数据：支持两种格式
+        1. 原始数据：6列 (x,y,z,rx,ry,rz) - 仅位置和姿态
+        2. 滤波数据：18列 (x,y,z,vx,vy,vz,ax,ay,az,rx,ry,rz,vrx,vry,vrz,arx,ary,arz) - 完整状态
+        3. 插值数据：18列 (x,y,z,vx,vy,vz,ax,ay,az,rx,ry,rz,vrx,vry,vrz,arx,ary,arz) - 完整状态
+        """
+        def load_original_data_core(filepath):
+            """加载原始数据（6列格式）"""
+            # 尝试读取CSV，可能有header
+            try:
+                df = pd.read_csv(filepath)
+                if df.shape[1] >= 6:
+                    # 有header的情况，重命名列
+                    df = df.iloc[:, :6]
+                    df.columns = ['x', 'y', 'z', 'rx', 'ry', 'rz']
+                else:
+                    raise ValueError("Column count insufficient")
+            except:
+                # 无header的情况
+                df = pd.read_csv(filepath, header=None)
+                df = df.apply(pd.to_numeric, errors='coerce')
+                df = df.dropna(subset=[0, 1, 2])
+                
+                if df.shape[1] < 6:
+                    raise ValueError(f"Original data file {filepath} needs at least 6 columns (x,y,z,rx,ry,rz), got {df.shape[1]}")
+                
+                df = df.iloc[:, :6]
+                df.columns = ['x', 'y', 'z', 'rx', 'ry', 'rz']
+            
+            # 添加计算得到的速度和加速度列（初始化为0）
+            df['vx'] = 0.0
+            df['vy'] = 0.0
+            df['vz'] = 0.0
+            df['ax'] = 0.0
+            df['ay'] = 0.0
+            df['az'] = 0.0
+            df['vrx'] = 0.0
+            df['vry'] = 0.0
+            df['vrz'] = 0.0
+            df['arx'] = 0.0
+            df['ary'] = 0.0
+            df['arz'] = 0.0
+            
+            return df
+
+        def load_smoothed_data_core(filepath):
+            """加载滤波数据（18列格式）"""
+            # 尝试读取CSV，可能有header
+            try:
+                df = pd.read_csv(filepath)
+                if df.shape[1] >= 18:
+                    # 有header的情况，重命名列
+                    df = df.iloc[:, :18]
+                    df.columns = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'ax', 'ay', 'az',
+                                 'rx', 'ry', 'rz', 'vrx', 'vry', 'vrz', 'arx', 'ary', 'arz']
+                else:
+                    raise ValueError("Column count insufficient")
+            except:
+                # 无header的情况
+                df = pd.read_csv(filepath, header=None)
+                df = df.apply(pd.to_numeric, errors='coerce')
+                df = df.dropna(subset=[0, 1, 2])
+                
+                if df.shape[1] < 18:
+                    raise ValueError(f"Smoothed data file {filepath} needs 18 columns, got {df.shape[1]}")
+                
+                df = df.iloc[:, :18]
+                df.columns = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'ax', 'ay', 'az',
+                             'rx', 'ry', 'rz', 'vrx', 'vry', 'vrz', 'arx', 'ary', 'arz']
+            
+            return df
+
+        def load_interpolated_data_core(filepath):
+            """加载插值数据（6列格式，仅位置和姿态）"""
+            try:
+                df = pd.read_csv(filepath)
+                if df.shape[1] >= 6:
+                    df = df.iloc[:, :6]
+                    df.columns = ['x', 'y', 'z', 'rx', 'ry', 'rz']
+                else:
+                    raise ValueError("Column count insufficient")
+            except:
+                df = pd.read_csv(filepath, header=None)
+                df = df.apply(pd.to_numeric, errors='coerce')
+                df = df.dropna(subset=[0, 1, 2])
+                
+                if df.shape[1] < 6:
+                    raise ValueError(f"Interpolated data file {filepath} needs at least 6 columns (x,y,z,rx,ry,rz), got {df.shape[1]}")
+                
+                df = df.iloc[:, :6]
+                df.columns = ['x', 'y', 'z', 'rx', 'ry', 'rz']
+            
+            # 初始化速度和加速度列
+            df['vx'] = 0.0
+            df['vy'] = 0.0
+            df['vz'] = 0.0
+            df['ax'] = 0.0
+            df['ay'] = 0.0
+            df['az'] = 0.0
+            df['vrx'] = 0.0
+            df['vry'] = 0.0
+            df['vrz'] = 0.0
+            df['arx'] = 0.0
+            df['ary'] = 0.0
+            df['arz'] = 0.0
+            
+            return df
 
         try:
-            # 1. 加载原始数据
-            self.original_data = load_data_core(original_file)
-            self.original_data['timestamp'] = np.arange(len(self.original_data)) / 60.0 # 60Hz
-            print(f"✅ 原始数据加载完成 | 数据点数: {len(self.original_data)} | 包含列: x,y,z,roll,pitch,yaw,timestamp")
+            # 1. 加载原始数据（如果提供）
+            if original_file is not None:
+                self.original_data = load_original_data_core(original_file)
+                self.original_data['timestamp'] = np.arange(len(self.original_data)) / 60.0 # 60Hz
+                
+                # 计算原始数据的速度和加速度（通过差分）
+                dt_orig = 1.0/60.0
+                # 位置的速度和加速度
+                self.original_data['vx'] = np.gradient(self.original_data['x'], dt_orig)
+                self.original_data['vy'] = np.gradient(self.original_data['y'], dt_orig)
+                self.original_data['vz'] = np.gradient(self.original_data['z'], dt_orig)
+                self.original_data['ax'] = np.gradient(self.original_data['vx'], dt_orig)
+                self.original_data['ay'] = np.gradient(self.original_data['vy'], dt_orig)
+                self.original_data['az'] = np.gradient(self.original_data['vz'], dt_orig)
+                
+                # 姿态的角速度和角加速度
+                self.original_data['vrx'] = np.gradient(self.original_data['rx'], dt_orig)
+                self.original_data['vry'] = np.gradient(self.original_data['ry'], dt_orig)
+                self.original_data['vrz'] = np.gradient(self.original_data['rz'], dt_orig)
+                self.original_data['arx'] = np.gradient(self.original_data['vrx'], dt_orig)
+                self.original_data['ary'] = np.gradient(self.original_data['vry'], dt_orig)
+                self.original_data['arz'] = np.gradient(self.original_data['vrz'], dt_orig)
+                
+                print(f"✅ Original data loaded | Data points: {len(self.original_data)} | Columns: x,y,z,rx,ry,rz + calculated velocities/accelerations")
 
-            # 2. 加载滤波数据
-            self.smoothed_data = load_data_core(smoothed_file)
-            self.smoothed_data['timestamp'] = np.arange(len(self.smoothed_data)) / 60.0 # 60Hz
-            print(f"✅ 滤波数据加载完成 | 数据点数: {len(self.smoothed_data)} | 包含列: x,y,z,roll,pitch,yaw,timestamp")
+            # 2. 加载滤波数据（如果提供）
+            if smoothed_file is not None:
+                self.smoothed_data = load_smoothed_data_core(smoothed_file)
+                self.smoothed_data['timestamp'] = np.arange(len(self.smoothed_data)) / 60.0 # 60Hz
+                
+                # Calculate differential velocity and acceleration for smoothed data (from position and attitude)
+                dt_smooth = 1.0/60.0
+                self.smoothed_data['vx_diff'] = np.gradient(self.smoothed_data['x'], dt_smooth)
+                self.smoothed_data['vy_diff'] = np.gradient(self.smoothed_data['y'], dt_smooth)
+                self.smoothed_data['vz_diff'] = np.gradient(self.smoothed_data['z'], dt_smooth)
+                self.smoothed_data['ax_diff'] = np.gradient(self.smoothed_data['vx_diff'], dt_smooth)
+                self.smoothed_data['ay_diff'] = np.gradient(self.smoothed_data['vy_diff'], dt_smooth)
+                self.smoothed_data['az_diff'] = np.gradient(self.smoothed_data['vz_diff'], dt_smooth)
+                
+                self.smoothed_data['vrx_diff'] = np.gradient(self.smoothed_data['rx'], dt_smooth)
+                self.smoothed_data['vry_diff'] = np.gradient(self.smoothed_data['ry'], dt_smooth)
+                self.smoothed_data['vrz_diff'] = np.gradient(self.smoothed_data['rz'], dt_smooth)
+                self.smoothed_data['arx_diff'] = np.gradient(self.smoothed_data['vrx_diff'], dt_smooth)
+                self.smoothed_data['ary_diff'] = np.gradient(self.smoothed_data['vry_diff'], dt_smooth)
+                self.smoothed_data['arz_diff'] = np.gradient(self.smoothed_data['vrz_diff'], dt_smooth)
 
-            # 3. 加载插值数据
-            self.interpolated_data = load_data_core(interpolated_file)
-            self.interpolated_data['timestamp'] = np.arange(len(self.interpolated_data)) / 600.0 # 600Hz
-            print(f"✅ 插值数据加载完成 | 数据点数: {len(self.interpolated_data)} | 包含列: x,y,z,roll,pitch,yaw,timestamp")
+                print(f"✅ Smoothed data loaded | Data points: {len(self.smoothed_data)} | Columns: x,y,z,vx,vy,vz,ax,ay,az,rx,ry,rz,vrx,vry,vrz,arx,ary,arz + calculated differential kinematics")
+            
+            # 3. 加载插值数据（如果提供）
+            if interpolated_file is not None:
+                self.interpolated_data = load_interpolated_data_core(interpolated_file) # 插值数据现在是6列格式
+                self.interpolated_data['timestamp'] = np.arange(len(self.interpolated_data)) / 1000.0 # 1000Hz
+                
+                # Calculate differential velocity and acceleration for interpolated data (from position and attitude)
+                dt_interp = 1.0/1000.0
+                self.interpolated_data['vx'] = np.gradient(self.interpolated_data['x'], dt_interp)
+                self.interpolated_data['vy'] = np.gradient(self.interpolated_data['y'], dt_interp)
+                self.interpolated_data['vz'] = np.gradient(self.interpolated_data['z'], dt_interp)
+                self.interpolated_data['ax'] = np.gradient(self.interpolated_data['vx'], dt_interp)
+                self.interpolated_data['ay'] = np.gradient(self.interpolated_data['vy'], dt_interp)
+                self.interpolated_data['az'] = np.gradient(self.interpolated_data['vz'], dt_interp)
+                
+                self.interpolated_data['vrx'] = np.gradient(self.interpolated_data['rx'], dt_interp)
+                self.interpolated_data['vry'] = np.gradient(self.interpolated_data['ry'], dt_interp)
+                self.interpolated_data['vrz'] = np.gradient(self.interpolated_data['rz'], dt_interp)
+                self.interpolated_data['arx'] = np.gradient(self.interpolated_data['vrx'], dt_interp)
+                self.interpolated_data['ary'] = np.gradient(self.interpolated_data['vry'], dt_interp)
+                self.interpolated_data['arz'] = np.gradient(self.interpolated_data['vrz'], dt_interp)
+
+                print(f"✅ Interpolated data loaded | Data points: {len(self.interpolated_data)} | Columns: x,y,z,rx,ry,rz + calculated velocities/accelerations")
 
             return True
 
-        except Exception as e:
-            print(f"❌ 数据加载失败: {str(e)}")
+        except FileNotFoundError as e:
+            print(f"❌ Error: File not found - {e.filename}")
             return False
-
-    def _calculate_kinematics(self, df, freq):
-        """计算轨迹的速度和加速度"""
-        if df is None or len(df) < 2:
-            return None, None, None, None
-
-        # 确保数据按时间戳排序
-        df = df.sort_values(by='timestamp').reset_index(drop=True)
-
-        # 计算时间差
-        dt = 1.0 / freq
-
-        # 计算速度
-        vx = np.gradient(df['x'], dt)
-        vy = np.gradient(df['y'], dt)
-        vz = np.gradient(df['z'], dt)
-        velocity_magnitude = np.sqrt(vx**2 + vy**2 + vz**2)
-
-        # 计算加速度
-        ax = np.gradient(vx, dt)
-        ay = np.gradient(vy, dt)
-        az = np.gradient(vz, dt)
-        acceleration_magnitude = np.sqrt(ax**2 + ay**2 + az**2)
-
-        return velocity_magnitude, acceleration_magnitude, vx, vy, vz
+        except ValueError as e:
+            print(f"❌ Data loading error: {e}")
+            return False
+        except Exception as e:
+            print(f"❌ An unexpected error occurred during data loading: {e}")
+            return False
 
     def plot_3d_trajectory_pair(self, data1, label1, data2, label2, title, save_path=None):
         """
@@ -124,8 +287,8 @@ class Trajectory3DComparator:
         ax = fig.add_subplot(111, projection='3d')
 
         # 样式配置（区分两组数据）
-        style1 = {"color": "#1f77b4", "linestyle": "-", "linewidth": 1.5, "alpha": 0.9}
-        style2 = {"color": "#ff7f0e", "linestyle": "--", "linewidth": 2.5, "alpha": 0.9}
+        style1 = {"color": "#1f77b4", "linestyle": "--", "linewidth": 1.5, "alpha": 0.9}
+        style2 = {"color": "#ff7f0e", "linestyle": "-", "linewidth": 2.5, "alpha": 0.9}
         marker_style = {"s": 80, "edgecolor": "white", "linewidth": 1.0}  # 起点/终点标记样式
 
         # 绘制两组3D轨迹
@@ -151,7 +314,7 @@ class Trajectory3DComparator:
         # 调整视角（默认45°仰角，便于观察3D轨迹）
         ax.view_init(elev=20, azim=45)
         plt.tight_layout()
-        plt.show()
+        # plt.show()
 
         # 保存或显示
         if save_path:
@@ -159,181 +322,229 @@ class Trajectory3DComparator:
             print(f"📊 3D轨迹图已保存: {save_path}")
         else:
             plt.show()
+        plt.close(fig)
 
     def plot_kinematics_comparison(self, save_path=None):
         """
-        速度和加速度对比（原始 vs 滤波 vs 插值）
+        Velocity and acceleration comparison: Original (differential) vs Kalman Filter output
         """
-        # 计算运动学
-        orig_vel, orig_acc, _, _, _ = self._calculate_kinematics(self.original_data, 60)
-        smooth_vel, smooth_acc, _, _, _ = self._calculate_kinematics(self.smoothed_data, 60)
-        interp_vel, interp_acc, _, _, _ = self._calculate_kinematics(self.interpolated_data, 600)
+        fig, axes = plt.subplots(4, 1, figsize=(14, 24), sharex=True) # 4行1列，共享x轴
+        fig.suptitle("Kinematics Comparison: Original vs Kalman Filter vs Interpolated", fontsize=14, fontweight="bold", y=0.95)
 
-        fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True) # 2行1列，共享x轴
-        fig.suptitle("Velocity and Acceleration Profile Comparison", fontsize=14, fontweight="bold", y=0.95)
-
-        # 1. 速度曲线对比
+        # 1. Position velocity comparison
         ax1 = axes[0]
-        if orig_vel is not None: ax1.plot(self.original_data['timestamp'], orig_vel, 'b-', label='Original Velocity', alpha=0.7, linewidth=1.5)
-        if smooth_vel is not None: ax1.plot(self.smoothed_data['timestamp'], smooth_vel, 'r-', label='Smoothed Velocity', alpha=0.7, linewidth=1.5)
-        if interp_vel is not None: ax1.plot(self.interpolated_data['timestamp'], interp_vel, 'g--', label='Interpolated Velocity', alpha=0.7, linewidth=1.5)
-        ax1.set_ylabel('Velocity (m/s)', fontsize=11)
-        ax1.legend(fontsize=9, loc="upper right")
+        if self.original_data is not None: 
+            vel_orig = np.sqrt(self.original_data['vx']**2 + self.original_data['vy']**2 + self.original_data['vz']**2)
+            ax1.plot(self.original_data['timestamp'], vel_orig, 'b-', label='Original (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.smoothed_data is not None: 
+            vel_smooth = np.sqrt(self.smoothed_data['vx']**2 + self.smoothed_data['vy']**2 + self.smoothed_data['vz']**2)
+            ax1.plot(self.smoothed_data['timestamp'], vel_smooth, 'r-', label='Smoothed (Kalman Filter)', alpha=0.8, linewidth=2.0)
+            
+            vel_smooth_diff = np.sqrt(self.smoothed_data['vx_diff']**2 + self.smoothed_data['vy_diff']**2 + self.smoothed_data['vz_diff']**2)
+            ax1.plot(self.smoothed_data['timestamp'], vel_smooth_diff, 'g--', label='Smoothed (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.interpolated_data is not None:
+            vel_interp = np.sqrt(self.interpolated_data['vx']**2 + self.interpolated_data['vy']**2 + self.interpolated_data['vz']**2)
+            ax1.plot(self.interpolated_data['timestamp'], vel_interp, 'm-', label='Interpolated (Differential)', alpha=0.8, linewidth=2.0)
+            
+            # vel_interp_diff = np.sqrt(self.interpolated_data['vx_diff']**2 + self.interpolated_data['vy_diff']**2 + self.interpolated_data['vz_diff']**2)
+            # ax1.plot(self.interpolated_data['timestamp'], vel_interp_diff, 'c--', label='Interpolated (Differential)', alpha=0.8, linewidth=1.5)
+
+        ax1.set_ylabel('Linear Velocity Magnitude (m/s)', fontsize=11)
+        ax1.legend(fontsize=10, loc="upper right")
         ax1.grid(True, linestyle="--", alpha=0.3)
-        ax1.set_title('Velocity Profile')
+        ax1.set_title('Linear Velocity Profile Comparison')
 
-        # 2. 加速度曲线对比
+        # 2. Position acceleration comparison
         ax2 = axes[1]
-        if orig_acc is not None: ax2.plot(self.original_data['timestamp'], orig_acc, 'b-', label='Original Acceleration', alpha=0.7, linewidth=1.5)
-        if smooth_acc is not None: ax2.plot(self.smoothed_data['timestamp'], smooth_acc, 'r-', label='Smoothed Acceleration', alpha=0.7, linewidth=1.5)
-        if interp_acc is not None: ax2.plot(self.interpolated_data['timestamp'], interp_acc, 'g--', label='Interpolated Acceleration', alpha=0.7, linewidth=1.5)
-        ax2.set_xlabel('Time (s)', fontsize=11)
-        ax2.set_ylabel('Acceleration (m/s²)', fontsize=11)
-        ax2.legend(fontsize=9, loc="upper right")
+        if self.original_data is not None: 
+            acc_orig = np.sqrt(self.original_data['ax']**2 + self.original_data['ay']**2 + self.original_data['az']**2)
+            ax2.plot(self.original_data['timestamp'], acc_orig, 'b-', label='Original (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.smoothed_data is not None: 
+            acc_smooth = np.sqrt(self.smoothed_data['ax']**2 + self.smoothed_data['ay']**2 + self.smoothed_data['az']**2)
+            ax2.plot(self.smoothed_data['timestamp'], acc_smooth, 'r-', label='Smoothed (Kalman Filter)', alpha=0.8, linewidth=2.0)
+            
+            acc_smooth_diff = np.sqrt(self.smoothed_data['ax_diff']**2 + self.smoothed_data['ay_diff']**2 + self.smoothed_data['az_diff']**2)
+            ax2.plot(self.smoothed_data['timestamp'], acc_smooth_diff, 'g--', label='Smoothed (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.interpolated_data is not None:
+            acc_interp = np.sqrt(self.interpolated_data['ax']**2 + self.interpolated_data['ay']**2 + self.interpolated_data['az']**2)
+            ax2.plot(self.interpolated_data['timestamp'], acc_interp, 'm-', label='Interpolated (Differential)', alpha=0.8, linewidth=2.0)
+            
+            # acc_interp_diff = np.sqrt(self.interpolated_data['ax_diff']**2 + self.interpolated_data['ay_diff']**2 + self.interpolated_data['az_diff']**2)
+            # ax2.plot(self.interpolated_data['timestamp'], acc_interp_diff, 'c--', label='Interpolated (Differential)', alpha=0.8, linewidth=1.5)
+
+        ax2.set_ylabel('Linear Acceleration Magnitude (m/s²)', fontsize=11)
+        ax2.legend(fontsize=10, loc="upper right")
         ax2.grid(True, linestyle="--", alpha=0.3)
-        ax2.set_title('Acceleration Profile')
+        ax2.set_title('Linear Acceleration Profile Comparison')
 
-        plt.subplots_adjust(left=0.08, right=0.95, top=0.9, bottom=0.08)
+        # 3. Angular velocity comparison
+        ax3 = axes[2]
+        if self.original_data is not None: 
+            avel_orig = np.sqrt(self.original_data['vrx']**2 + self.original_data['vry']**2 + self.original_data['vrz']**2)
+            ax3.plot(self.original_data['timestamp'], avel_orig, 'b-', label='Original (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.smoothed_data is not None: 
+            avel_smooth = np.sqrt(self.smoothed_data['vrx']**2 + self.smoothed_data['vry']**2 + self.smoothed_data['vrz']**2)
+            ax3.plot(self.smoothed_data['timestamp'], avel_smooth, 'r-', label='Smoothed (Kalman Filter)', alpha=0.8, linewidth=2.0)
+            
+            avel_smooth_diff = np.sqrt(self.smoothed_data['vrx_diff']**2 + self.smoothed_data['vry_diff']**2 + self.smoothed_data['vrz_diff']**2)
+            ax3.plot(self.smoothed_data['timestamp'], avel_smooth_diff, 'g--', label='Smoothed (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.interpolated_data is not None:
+            avel_interp = np.sqrt(self.interpolated_data['vrx']**2 + self.interpolated_data['vry']**2 + self.interpolated_data['vrz']**2)
+            ax3.plot(self.interpolated_data['timestamp'], avel_interp, 'm-', label='Interpolated (Differential)', alpha=0.8, linewidth=2.0)
+            
+            # avel_interp_diff = np.sqrt(self.interpolated_data['vrx_diff']**2 + self.interpolated_data['vry_diff']**2 + self.interpolated_data['vrz_diff']**2)
+            # ax3.plot(self.interpolated_data['timestamp'], avel_interp_diff, 'c--', label='Interpolated (Differential)', alpha=0.8, linewidth=1.5)
 
-        # 保存或显示
+        ax3.set_ylabel('Angular Velocity Magnitude (rad/s)', fontsize=11)
+        ax3.legend(fontsize=10, loc="upper right")
+        ax3.grid(True, linestyle="--", alpha=0.3)
+        ax3.set_title('Angular Velocity Profile Comparison')
+
+        # 4. Angular acceleration comparison
+        ax4 = axes[3]
+        if self.original_data is not None: 
+            aacc_orig = np.sqrt(self.original_data['arx']**2 + self.original_data['ary']**2 + self.original_data['arz']**2)
+            ax4.plot(self.original_data['timestamp'], aacc_orig, 'b-', label='Original (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.smoothed_data is not None: 
+            aacc_smooth = np.sqrt(self.smoothed_data['arx']**2 + self.smoothed_data['ary']**2 + self.smoothed_data['arz']**2)
+            ax4.plot(self.smoothed_data['timestamp'], aacc_smooth, 'r-', label='Smoothed (Kalman Filter)', alpha=0.8, linewidth=2.0)
+            
+            aacc_smooth_diff = np.sqrt(self.smoothed_data['arx_diff']**2 + self.smoothed_data['ary_diff']**2 + self.smoothed_data['az_diff']**2)
+            ax4.plot(self.smoothed_data['timestamp'], aacc_smooth_diff, 'g--', label='Smoothed (Differential)', alpha=0.8, linewidth=1.5)
+        
+        if self.interpolated_data is not None:
+            aacc_interp = np.sqrt(self.interpolated_data['arx']**2 + self.interpolated_data['ary']**2 + self.interpolated_data['arz']**2)
+            ax4.plot(self.interpolated_data['timestamp'], aacc_interp, 'm-', label='Interpolated (Differential)', alpha=0.8, linewidth=2.0)
+            
+            # aacc_interp_diff = np.sqrt(self.interpolated_data['arx_diff']**2 + self.interpolated_data['ary_diff']**2 + self.interpolated_data['arz_diff']**2)
+            # ax4.plot(self.interpolated_data['timestamp'], aacc_interp_diff, 'c--', label='Interpolated (Differential)', alpha=0.8, linewidth=1.5)
+
+        ax4.set_xlabel('Time (s)', fontsize=11)
+        ax4.set_ylabel('Angular Acceleration Magnitude (rad/s²)', fontsize=11)
+        ax4.legend(fontsize=10, loc="upper right")
+        ax4.grid(True, linestyle="--", alpha=0.3)
+        ax4.set_title('Angular Acceleration Profile Comparison')
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.93]) # 调整布局，避免标题重叠
+        # plt.show()
+
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight", facecolor="white")
-            print(f"📊 速度/加速度对比图已保存: {save_path}")
-        # else:
-        #     plt.show()
+            print(f"📊 运动学对比图已保存: {save_path}")
+        else:
+            plt.show()
+        plt.close(fig)
 
     def plot_rpy_comparison(self, save_path=None):
         """
-        RPY姿态对比（处理插值数据10倍点数的情况）
-        使用归一化时间轴（0到1.0），使原始和插值数据在相同时间范围内显示
+        RPY姿态时间序列对比：原始 vs 滤波 vs 插值
         """
-        # 创建3行1列的子图
-        fig = plt.figure(figsize=(12, 10))
-        gs = fig.add_gridspec(3, 1, hspace=0.3, height_ratios=[1, 1, 1.2])
-        axes = [fig.add_subplot(gs[0]), fig.add_subplot(gs[1]), fig.add_subplot(gs[2])]
-        
-        # 总标题
-        fig.suptitle("RPY Attitude Comparison (Original vs Interpolated)", 
-                     fontsize=14, fontweight="bold", y=0.95)
+        fig, axes = plt.subplots(3, 1, figsize=(14, 18), sharex=True)
+        fig.suptitle("RPY Orientation Comparison: Original vs Smoothed vs Interpolated", fontsize=14, fontweight="bold", y=0.95)
 
-        # 姿态角配置
-        rpy_config = [
-            ("roll", "Roll [rad]", "#2ca02c"),
-            ("pitch", "Pitch [rad]", "#d62728"),
-            ("yaw", "Yaw [rad]", "#9467bd")
-        ]
+        # Roll
+        ax1 = axes[0]
+        if self.original_data is not None:
+            ax1.plot(self.original_data['timestamp'], self.original_data['rx'], 'b-', label='Original', alpha=0.8, linewidth=1.5)
+        if self.smoothed_data is not None:
+            ax1.plot(self.smoothed_data['timestamp'], self.smoothed_data['rx'], 'r-', label='Smoothed', alpha=0.8, linewidth=2.0)
+        if self.interpolated_data is not None:
+            ax1.plot(self.interpolated_data['timestamp'], self.interpolated_data['rx'], 'm-', label='Interpolated', alpha=0.8, linewidth=2.0)
+        ax1.set_ylabel('Roll (rad)', fontsize=11)
+        ax1.legend(fontsize=10, loc="upper right")
+        ax1.grid(True, linestyle="--", alpha=0.3)
+        ax1.set_title('Roll Angle Over Time')
 
-        # 绘制每个姿态角的对比曲线
-        for i, (col, label, color) in enumerate(rpy_config):
-            ax = axes[i]
-            
-            # 原始数据（点数少，实线）
-            ax.plot(self.original_data['timestamp'], self.original_data[col],
-                    color=color, linestyle="-", linewidth=1.5, alpha=0.9, label="Original")
-            
-            # 滤波数据
-            ax.plot(self.smoothed_data['timestamp'], self.smoothed_data[col],
-                    color=color, linestyle="-", linewidth=1.5, alpha=0.9, label="Smoothed")
+        # Pitch
+        ax2 = axes[1]
+        if self.original_data is not None:
+            ax2.plot(self.original_data['timestamp'], self.original_data['ry'], 'b-', label='Original', alpha=0.8, linewidth=1.5)
+        if self.smoothed_data is not None:
+            ax2.plot(self.smoothed_data['timestamp'], self.smoothed_data['ry'], 'r-', label='Smoothed', alpha=0.8, linewidth=2.0)
+        if self.interpolated_data is not None:
+            ax2.plot(self.interpolated_data['timestamp'], self.interpolated_data['ry'], 'm-', label='Interpolated', alpha=0.8, linewidth=2.0)
+        ax2.set_ylabel('Pitch (rad)', fontsize=11)
+        ax2.legend(fontsize=10, loc="upper right")
+        ax2.grid(True, linestyle="--", alpha=0.3)
+        ax2.set_title('Pitch Angle Over Time')
 
-            # 插值数据（点数多10倍，虚线）
-            ax.plot(self.interpolated_data['timestamp'], self.interpolated_data[col],
-                    color=color, linestyle="--", linewidth=2.5, alpha=0.8, label="Interpolated")
+        # Yaw
+        ax3 = axes[2]
+        if self.original_data is not None:
+            ax3.plot(self.original_data['timestamp'], self.original_data['rz'], 'b-', label='Original', alpha=0.8, linewidth=1.5)
+        if self.smoothed_data is not None:
+            ax3.plot(self.smoothed_data['timestamp'], self.smoothed_data['rz'], 'r-', label='Smoothed', alpha=0.8, linewidth=2.0)
+        if self.interpolated_data is not None:
+            ax3.plot(self.interpolated_data['timestamp'], self.interpolated_data['rz'], 'm-', label='Interpolated', alpha=0.8, linewidth=2.0)
+        ax3.set_xlabel('Time (s)', fontsize=11)
+        ax3.set_ylabel('Yaw (rad)', fontsize=11)
+        ax3.legend(fontsize=10, loc="upper right")
+        ax3.grid(True, linestyle="--", alpha=0.3)
+        ax3.set_title('Yaw Angle Over Time')
 
-            # 子图配置
-            ax.set_ylabel(label, fontsize=11)
-            ax.grid(True, linestyle="--", alpha=0.3)
-            ax.legend(fontsize=9, loc="upper right")
-            ax.spines["top"].set_visible(False)  # 移除顶部边框
-            
-            # 设置x轴范围（0到1.0，归一化时间）
-            # ax.set_xlim(0, 1.0)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.93])
+        # plt.show()
 
-        # 最后一个子图添加x轴标签（归一化时间）
-        axes[-1].set_xlabel("Time (s)", fontsize=11)
-
-        plt.subplots_adjust(left=0.08, right=0.95, top=0.9, bottom=0.08)
-        
-        # 保存或显示
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight", facecolor="white")
-            print(f"📊 RPY对比图已保存: {save_path}")
-        # else:
-        #     plt.show()
+            print(f"📊 RPY姿态对比图已保存: {save_path}")
+        else:
+            plt.show()
+        plt.close(fig)
 
-    def run_full_comparison(self, original_file, smoothed_file, interpolated_file, save_dir='./plots'):
+    def run_comparison(self, original_file, smoothed_file, interpolated_file, output_dir):
         """
-        执行完整对比流程：加载数据 → 绘制3D对比图 → 绘制RPY对比图
-        :param save_dir: 图表保存目录（自动创建）
+        运行所有对比并保存图表
         """
-        # 创建保存目录（不存在则创建）
-        save_dir = Path(save_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        print(f"📁 图表保存目录: {save_dir.absolute()}")
-
-        # 加载数据（失败则退出）
         if not self.load_data(original_file, smoothed_file, interpolated_file):
-            print("❌ 数据加载失败，终止对比流程")
             return
 
-        # 1. 绘制3D原始 vs 滤波轨迹
-        self.plot_3d_trajectory_pair(
-            data1=self.original_data,
-            label1="Original",
-            data2=self.smoothed_data,
-            label2="Smoothed",
-            title="3D Trajectory: Original vs Smoothed",
-            save_path=save_dir / "3d_original_vs_smoothed.png"
-        )
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-        # 2. 绘制3D原始 vs 插值轨迹
-        self.plot_3d_trajectory_pair(
-            data1=self.original_data,
-            label1="Original",
-            data2=self.interpolated_data,
-            label2="Interpolated",
-            title="3D Trajectory: Original vs Interpolated",
-            save_path=save_dir / "3d_original_vs_interpolated.png"
-        )
+        # 1. 3D轨迹对比：原始 vs 滤波
+        if self.original_data is not None and self.smoothed_data is not None:
+            self.plot_3d_trajectory_pair(self.original_data, "Original", self.smoothed_data, "Smoothed",
+                                         "3D Trajectory Comparison: Original vs Smoothed",
+                                         Path(output_dir) / "3d_original_vs_smoothed.png")
 
-        # 3. 绘制RPY原始 vs 滤波 vs 插值对比
-        self.plot_rpy_comparison(
-            save_path=save_dir / "rpy_original_vs_interpolated.png"
-        )
+        # 2. 3D轨迹对比：原始 vs 插值
+        if self.original_data is not None and self.interpolated_data is not None:
+            self.plot_3d_trajectory_pair(self.original_data, "Original", self.interpolated_data, "Interpolated",
+                                         "3D Trajectory Comparison: Original vs Interpolated",
+                                         Path(output_dir) / "3d_original_vs_interpolated.png")
 
-        # 4. 绘制速度和加速度对比
-        self.plot_kinematics_comparison(
-            save_path=save_dir / "kinematics_comparison.png"
-        )
+        # 3. 运动学对比：原始 vs 滤波 vs 插值
+        if self.original_data is not None or self.smoothed_data is not None or self.interpolated_data is not None:
+            self.plot_kinematics_comparison(Path(output_dir) / "kinematics_comparison.png")
 
-        print("\n🎉 所有3D轨迹与RPY对比图表生成完成！")
-
-
-def main():
-    # 命令行参数解析（关键修改：给3个核心参数设置默认路径）
-    parser = argparse.ArgumentParser(description="3D Trajectory & RPY Comparison Tool（默认路径已配置）")
-    parser.add_argument('--original', '-o', 
-                        default='/home/chen/Documents/GPMPFilter/data/trajectory.csv',  # 默认原始数据路径
-                        help='原始3D轨迹数据文件路径（默认：/home/chen/Documents/GPMPFilter/data/trajectory.csv）')
-    parser.add_argument('--smoothed', '-s', 
-                        default='/home/chen/Documents/GPMPFilter/output/smoothed_trajectory.csv',  # 默认滤波数据路径
-                        help='滤波后3D轨迹数据文件路径（默认：/home/chen/Documents/GPMPFilter/output/smoothed_trajectory.csv）')
-    parser.add_argument('--interpolated', '-i', 
-                        default='/home/chen/Documents/GPMPFilter/output/interpolated_trajectory.csv',  # 默认插值数据路径
-                        help='插值后3D轨迹数据文件路径（默认：/home/chen/Documents/GPMPFilter/output/interpolated_trajectory.csv）')
-    parser.add_argument('--save-dir', '-d', default='/home/chen/Documents/GPMPFilter/plots', 
-                        help='图表保存目录（默认：/home/chen/Documents/GPMPFilter/plots）')
-
-    args = parser.parse_args()
-
-    # 初始化对比器并执行
-    comparator = Trajectory3DComparator()
-    comparator.run_full_comparison(
-        original_file=args.original,
-        smoothed_file=args.smoothed,
-        interpolated_file=args.interpolated,
-        save_dir=args.save_dir
-    )
+        # 4. RPY姿态时间序列对比：原始 vs 滤波 vs 插值
+        if self.original_data is not None or self.smoothed_data is not None or self.interpolated_data is not None:
+            self.plot_rpy_comparison(Path(output_dir) / "rpy_comparison.png")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Compare 3D trajectories and RPY orientations.")
+    parser.add_argument('--original', type=str,
+                        default='./data/trajectory.csv',  # Default original data path
+                        help='Path to the original trajectory CSV file (x,y,z,rx,ry,rz).')
+    parser.add_argument('--smoothed', type=str,
+                        default='./output/smoothed_trajectory.csv',  # Default smoothed data path
+                        help='Path to the smoothed trajectory CSV file (18 columns).')
+    parser.add_argument('--interpolated', type=str,
+                        default='./output/interpolated_pose_1kHz.csv',  # Default interpolated data path
+                        help='Path to the interpolated trajectory CSV file (6 or 18 columns).')
+    parser.add_argument('--output_dir', type=str,
+                        default='./plots',  # Default output directory for plots
+                        help='Directory to save the comparison plots.')
+
+    args = parser.parse_args()
+
+    comparator = Trajectory3DComparator()
+    comparator.run_comparison(args.original, args.smoothed, args.interpolated, args.output_dir)
