@@ -1,0 +1,15 @@
+# Virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+
+# Output directories
+output/
+plots/
+
+# Log files
+debug.log
+
+# C++ build directory
+cpp_kf/build/
