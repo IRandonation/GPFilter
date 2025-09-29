@@ -355,14 +355,14 @@ class FilterComparisonPlotter:
 def main():
     parser = argparse.ArgumentParser(description='Filtering Effect Comparison Plotting Tool')
     parser.add_argument('--original', '-o',
-                       default='../data/trajectory.csv',
+                       default='./data/trajectory.csv',
                        help='Path to the original data file (default: ../data/trajectory.csv)')
     parser.add_argument('--filtered', '-f',
-                       default='../output/smoothed_trajectory.csv',
+                       default='./output/smoothed_trajectory.csv',
                        help='Path to the filtered data file (default: ../output/smoothed_trajectory.csv)')
     parser.add_argument('--output-dir', '-d',
-                       default='/mnt/hgfs/RobotArm/GPFilter/plots',
-                       help='Output directory for plots (default: /mnt/hgfs/RobotArm/GPFilter/plots)')
+                       default='./plots',
+                       help='Output directory for plots (default: ./plots)')
     parser.add_argument('--stats', action='store_true',
                        help='Display detailed statistics')
     

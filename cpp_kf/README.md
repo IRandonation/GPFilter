@@ -1,42 +1,215 @@
-# GPFilterKF (Kalman Filter for XYZ Trajectory)
+# Kalman Filter with Online RTS Smoother (1D Constant Acceleration Model)
 
-This is a minimal C++ framework to filter 3D position (x, y, z) measurements from a CSV file using a constant-acceleration Kalman Filter. The state for each axis is `[pos, vel, acc]`. The measurement is position only.
+## 简介
 
-The project is designed for Ubuntu (g++/CMake), but it is cross-platform and should build on Windows as well.
+`main.cpp` 文件实现了一个基于一维匀加速（1D Constant Acceleration, 1DCA）模型的卡尔曼滤波器（Kalman Filter, KF），并集成了在线RTS平滑器（Rauch-Tung-Striebel Smoother）。该实现旨在对六自由度（6DoF）轨迹数据（位置和姿态）进行实时滤波和平滑处理，特别适用于需要降低延迟并提供平滑输出的应用场景。
 
-## Build (Ubuntu)
+## 1. 流程说明
 
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential cmake
+整个程序的执行流程可以分为以下几个主要阶段：
 
-cd cpp_kf
-mkdir -p build && cd build
-cmake ..
-cmake --build . -j
-```
+1.  **数据加载与初始化**：
+    *   程序从指定的CSV文件（默认为 `../../data/trajectory.csv`）加载原始的6DoF轨迹数据。每行数据包含 `x, y, z, rx, ry, rz` 六个分量。
+    *   为每个自由度（x, y, z, rx, ry, rz）分别实例化一个 `KF1DCA` 对象，形成六个独立的1DCA卡尔曼滤波器。
+    *   设置每个滤波器的采样时间 `Ts`、过程噪声 `Q`、测量噪声 `R` 和平滑窗口大小 `window_size`。
+    *   使用轨迹的第一个测量值初始化所有卡尔曼滤波器的状态。
 
-## Run
+2.  **在线滤波与平滑处理循环**：
+    *   程序遍历加载的每一帧原始测量数据。
+    *   对于每一帧数据，每个 `KF1DCA` 实例执行以下操作：
+        *   **预测（Predict）**：根据当前状态和系统模型预测下一时刻的状态和协方差。
+        *   **更新（Update）**：利用当前测量值修正预测状态和协方差。在 `update` 过程中，`data_count` 会递增。
+        *   **在线平滑触发**：当 `data_count` 达到 `window_size` 时，`smoothOnline()` 方法会被触发。此后，每次 `update` 都会触发 `smoothOnline()`。
+        *   **循环缓冲区管理**：`x_history`, `x_pred_history`, `P_history`, `P_pred_history` 等数据结构以循环缓冲区的方式存储滤波器的历史状态和协方差，用于RTS平滑。
+        *   **输出缓冲区**：`smoothOnline()` 方法会将当前窗口中最旧的平滑结果存储到 `output_buffer` 中。
 
-By default it will try to read the CSV file at `../data/trajectory.csv` relative to the project root.
+3.  **剩余数据处理**：
+    *   在主循环结束后，为了处理平滑窗口中剩余但尚未输出的数据，程序会额外调用 `window_size - 1` 次 `smoothOnline()` 方法。这确保了所有经过平滑的数据都被输出。
 
-```bash
-./gpfilter_kf --csv "../../data/trajectory.csv" --dt 0.01 \
-  --q_pos 1e-4 --q_vel 1e-3 --q_acc 1e-2 --r 1e-3 --out "filtered_xyz.csv"
-```
+4.  **结果收集与保存**：
+    *   程序从每个 `KF1DCA` 实例的 `output_buffer` 中收集所有平滑后的状态（位置、速度、加速度以及姿态、角速度、角加速度）。
+    *   将完整的18维状态数据（x,y,z,vx,vy,vz,ax,ay,az,rx,ry,rz,vrx,vry,vrz,arx,ary,arz）写入到指定的输出CSV文件（默认为 `../../output/smoothed_trajectory.csv`）。
 
-Arguments:
-- `--csv` path to input CSV with at least 3 columns (x,y,z). Extra columns will be ignored.
-- `--dt` sampling period seconds.
-- `--q_pos`, `--q_vel`, `--q_acc` diagonal process noise for each state element per axis.
-- `--r` measurement noise variance (position).
-- `--out` output CSV path. If omitted, prints summary to stdout.
+## 2. 推导过程
 
-## CSV format
+### 2.1 卡尔曼滤波器 (Kalman Filter, KF)
 
-Each row must contain at least three floating point numbers: `x,y,z,...`
+卡尔曼滤波器是一种最优线性估计器，用于估计动态系统的状态。它通过预测和更新两个步骤迭代进行。
 
-## Notes
+**状态定义**：对于每个一维自由度，我们假设其运动遵循匀加速模型。因此，状态向量 `x` 定义为：
+    `$$x = [p, v, a]^T$$`
+其中，`p` 是位置 (position)，`v` 是速度 (velocity)，`a` 是加速度 (acceleration)。
 
-- This repository provides just the framework and a simple reference implementation. You can tune Q/R according to your sensor characteristics.
-- The transition matrix models constant acceleration with jerk as process noise.
+**预测步骤 (Prediction Step)**：
+预测步骤利用系统模型来估计下一时刻的状态和协方差。
+
+1.  **状态预测 (State Prediction)**：
+        `$$x_{pred_k} = A * x_{k-1}$$`
+    这里，`x_pred_k` 是在 `k-1` 时刻状态 `x_{k-1}` 的基础上，通过状态转移矩阵 `A` 预测得到的 `k` 时刻的先验状态估计。`A` 描述了系统状态如何从一个时间步演变到下一个时间步。
+
+2.  **协方差预测 (Covariance Prediction)**：
+        `$$P_{pred_k} = A * P_{k-1} * A^T + Q$$`
+    `P_pred_k` 是 `k` 时刻的先验误差协方差估计，反映了预测状态的不确定性。`P_{k-1}` 是 `k-1` 时刻的后验误差协方差。`Q` 是过程噪声协方差矩阵，它量化了系统模型本身的不确定性或未建模的扰动。`A^T` 是 `A` 的转置。
+
+**更新步骤 (Update Step)**：
+更新步骤利用当前的测量值来修正预测步骤得到的先验估计，从而得到更准确的后验估计。
+
+1.  **测量残差 (Measurement Residual)**：
+    `y_k = z_k - H * x_pred_k`
+    `y_k` 是测量残差，表示实际测量值 `z_k` 与基于预测状态 `x_pred_k` 得到的预测测量值 `H * x_pred_k` 之间的差异。`H` 是测量矩阵，它将状态向量映射到测量空间。
+
+2.  **残差协方差 (Residual Covariance)**：
+    `S_k = H * P_pred_k * H^T + R`
+    `S_k` 是测量残差 `y_k` 的协方差，反映了测量残差的不确定性。它结合了预测状态的不确定性 (`H * P_pred_k * H^T`) 和测量本身的不确定性 (`R`)。`R` 是测量噪声协方差，量化了测量传感器引入的噪声。
+
+3.  **卡尔曼增益 (Kalman Gain)**：
+    `K_k = P_pred_k * H^T * S_k^{-1}`
+    卡尔曼增益 `K_k` 是一个权重因子，它决定了在更新状态时，对测量残差 `y_k` 的信任程度。`S_k^{-1}` 是 `S_k` 的逆矩阵。
+
+4.  **状态更新 (State Update)**：
+    `x_k = x_pred_k + K_k * y_k`
+    `x_k` 是 `k` 时刻的后验状态估计，它是通过将预测状态 `x_pred_k` 与加权的测量残差 `K_k * y_k` 相结合得到的。
+
+5.  **协方差更新 (Covariance Update)**：
+    `P_k = (I - K_k * H) * P_pred_k`
+    `P_k` 是 `k` 时刻的后验误差协方差，反映了更新后状态的不确定性。`I` 是单位矩阵。这个公式表明，通过结合测量信息，状态估计的不确定性得到了降低。
+
+### 2.2 RTS 平滑器 (Rauch-Tung-Striebel Smoother)
+
+RTS平滑器是一种固定区间平滑算法，它在卡尔曼滤波器完成所有正向滤波后，通过一个反向过程来改进所有过去的状态估计。与仅使用过去数据进行估计的卡尔曼滤波器不同，RTS平滑器利用了整个时间序列（包括未来数据）来提供更准确的估计。本实现将其修改为在线滑动窗口模式，以适应实时应用。
+
+**RTS平滑器核心方程（反向过程）**：
+
+RTS平滑器从最后一个时间步 `N-1` 开始，反向迭代到第一个时间步 `0`。对于每个时间步 `k` (从 `N-1` 递减到 `0`)：
+
+1.  **平滑增益 (Smoother Gain)**：
+    `C_k = P_k * A^T * (P_pred_{k+1})^{-1}`
+    `C_k` 是平滑增益，它决定了未来平滑状态对当前时间步平滑状态的影响程度。
+    *   `P_k` 是时刻 `k` 的卡尔曼滤波后验协方差。
+    *   `A^T` 是状态转移矩阵 `A` 的转置。
+    *   `(P_pred_{k+1})^{-1}` 是时刻 `k+1` 的卡尔曼滤波器先验协方差的逆矩阵。
+
+2.  **平滑状态 (Smoothed State)**：
+    `x_smooth_k = x_k + C_k * (x_smooth_{k+1} - x_pred_{k+1})`
+    `x_smooth_k` 是时刻 `k` 的平滑状态估计。
+    *   `x_k` 是时刻 `k` 的卡尔曼滤波后验状态。
+    *   `x_smooth_{k+1}` 是时刻 `k+1` 的平滑状态（在反向迭代中，这个值已经计算得到）。
+    *   `x_pred_{k+1}` 是时刻 `k+1` 的卡尔曼滤波器先验状态。
+    这个方程的直观解释是，当前时刻的平滑状态 `x_smooth_k` 是由当前时刻的滤波状态 `x_k` 加上一个修正项得到的。修正项 `C_k * (x_smooth_{k+1} - x_pred_{k+1})` 考虑了未来平滑状态与未来预测状态之间的差异，并根据平滑增益 `C_k` 进行加权。
+
+### 2.3 1D 匀加速模型 (1D Constant Acceleration Model)
+
+对于每个独立的1D自由度，我们假设其运动遵循匀加速模型，即加速度在采样周期 `dt` 内保持不变。状态向量 `x = [p, v, a]^T` (位置、速度、加速度)。
+
+*   **状态转移矩阵 `A` 的推导**：
+    根据运动学方程：
+    1.  $p_k = p_{k-1} + v_{k-1} * dt + 0.5 * a_{k-1} * dt^2$
+    2.  $v_k = v_{k-1} + a_{k-1} * dt$
+    3.  $a_k = a_{k-1}$ (假设加速度恒定)
+
+    将这些方程写成矩阵形式 `x_k = A * x_{k-1}`：
+    `[[p_k], [v_k], [a_k]] = [[1, dt, 0.5*dt^2], [0, 1, dt], [0, 0, 1]] * [[p_{k-1}], [v_{k-1}], [a_{k-1}]]`
+    因此，状态转移矩阵 `A` 为：
+    `A = [[1, dt, 0.5*dt^2], [0, 1, dt], [0, 0, 1]]`
+    其中 `dt` 是采样时间。
+
+*   **测量矩阵 `H`**：
+    由于我们只测量位置 `p`，测量值 `z` 与状态向量 `x` 的关系为 `z = H * x`。
+    `z_k = [1, 0, 0] * [[p_k], [v_k], [a_k]] = p_k`
+    因此，测量矩阵 `H` 为：
+    `H = [1, 0, 0]`
+
+*   **过程噪声协方差 `Q`**：
+    `Q` 是一个 `3x3` 的对角矩阵，其对角线元素 `qpos, qvel, qacc` 分别代表位置、速度和加速度的过程噪声方差。这些噪声通常用于补偿模型与实际系统之间的不匹配，例如未建模的力或加速度的微小变化。
+    `Q = [[qpos, 0, 0], [0, qvel, 0], [0, 0, qacc]]`
+    在实际应用中，`qpos`, `qvel`, `qacc` 的值需要根据经验或系统特性进行调整。
+
+*   **测量噪声协方差 `R`**：
+    `R` 是一个标量，代表位置测量的噪声方差。它反映了测量传感器本身的精度和噪声水平。
+    `R = [[r]]`
+    其中 `r` 是测量噪声的方差。
+
+### 2.4 在线滑动窗口平滑
+
+为了实现在线平滑，RTS平滑器被应用于一个固定大小的滑动窗口 `window_size` 内。当新的数据进入时，最旧的数据点被平滑并输出。这种方法在保持平滑效果的同时，引入了可控的延迟。
+
+*   **数据积累**：系统首先积累 `window_size` 个数据点。在这个阶段，只进行卡尔曼滤波，不进行平滑输出。
+*   **首次平滑**：当积累到 `window_size` 个数据点后，执行第一次RTS平滑。此时，整个窗口内的数据都可用于平滑。平滑完成后，将窗口中最旧的数据点（即 `current_index` 处的数据）作为平滑结果输出。
+*   **滑动窗口**：此后，每当有新的数据点进入，它会替换掉循环缓冲区中最旧的数据点。`current_index` 移动到新的最旧数据点的位置，并再次执行RTS平滑。平滑结果依然是窗口中最旧的数据点。
+*   **延迟**：这种方法引入了 `window_size - 1` 个时间步的固定延迟。这是因为RTS平滑需要利用未来数据来改进当前估计，所以必须等待 `window_size - 1` 个新的测量值进入窗口后，才能对窗口中最旧的数据点进行最终的平滑。这是一个在平滑度（`window_size` 越大，平滑效果越好）和延迟（`window_size` 越大，延迟越大）之间进行权衡的参数。
+
+
+## 3. 算法实现
+
+### 3.1 `KF1DCA` 结构体
+
+`KF1DCA` 结构体封装了单个1DCA卡尔曼滤波器和在线RTS平滑器的所有状态和逻辑。
+
+*   **成员变量**：
+    *   `x[3]`：当前滤波后的状态 `[pos, vel, acc]`。
+    *   `P[3][3]`：当前滤波后的协方差矩阵。
+    *   `x_pred[3]`：预测状态。
+    *   `Q[3][3]`：过程噪声协方差矩阵。
+    *   `R`：测量噪声方差。
+    *   `Ts`：采样时间。
+    *   `x_history`, `x_pred_history`, `P_history`, `P_pred_history`：用于RTS平滑的循环缓冲区，存储滤波和预测的历史状态及协方差。
+    *   `x_smooth`：存储平滑后的状态的循环缓冲区。
+    *   `output_buffer`：存储最终输出的平滑结果的缓冲区。
+    *   `enable_smoothing`：布尔标志，控制是否启用平滑。
+    *   `window_size`：平滑窗口的大小。
+    *   `current_index`：循环缓冲区中的当前写入位置。
+    *   `data_count`：已处理的数据点计数，用于判断何时开始平滑。
+
+*   **关键方法**：
+    *   `setNoise(qpos, qvel, qacc, r)`：设置过程噪声和测量噪声。
+    *   `setDt(ts)`：设置采样时间。
+    *   `setWindowSize(size)`：设置平滑窗口大小，并调用 `initializeBuffers()`。
+    *   `initializeBuffers()`：根据 `window_size` 初始化所有历史缓冲区的大小和结构。
+    *   `predict()`：执行卡尔曼滤波器的预测步骤，计算 `x_pred` 和 `P_pred`，并将其存储到循环缓冲区中。
+    *   `update(z)`：执行卡尔曼滤波器的更新步骤，利用测量值 `z` 修正状态 `x` 和协方差 `P`。当 `data_count` 达到 `window_size` 时，会调用 `smoothOnline()`。
+    *   `smoothOnline()`：实现在线RTS平滑的核心逻辑。它在当前滑动窗口内执行RTS反向平滑，并将窗口中最旧的平滑结果添加到 `output_buffer`。
+        *   **逆矩阵计算**：代码中包含了3x3矩阵求逆的显式公式，用于计算 `P_pred_{k+1}^{-1}`。
+        *   **平滑增益 `C_k` 计算**：根据公式 `P_k * A^T * P_pred_{k+1}^{-1}` 计算。
+        *   **平滑状态 `x_smooth_k` 计算**：根据公式 `x_k + C_k * (x_smooth_{k+1} - x_pred_{k+1})` 计算。
+    *   `getSmoothedState(k, state)`：从 `output_buffer` 中获取指定索引 `k` 的平滑状态。
+    *   `getOutputSize()`：返回 `output_buffer` 中存储的平滑结果数量。
+    *   `clearHistory()`：清空所有历史缓冲区和计数器，用于重新开始新的轨迹处理。
+
+### 3.2 辅助结构体与函数
+
+*   `struct Vec3`, `struct Vec6`, `struct Vec9`：用于方便地存储3D、6DoF和9D状态数据。
+*   `read_6d_csv(const std::string& path, std::vector<Vec6>& out)`：从CSV文件读取6DoF数据。
+*   `write_full_state_out(const std::string& path, const std::vector<Vec9>& pos_state, const std::vector<Vec9>& rpy_state)`：将完整的18维状态数据写入CSV文件。
+
+### 3.3 `main` 函数
+
+`main` 函数是程序的入口点，负责协调整个滤波和平滑过程。
+
+1.  **参数配置**：定义了输入CSV路径、输出CSV路径、采样时间 `dt`、噪声参数 `qpos, qvel, qacc, r` 和 `window_size`。
+2.  **数据读取**：调用 `read_6d_csv` 读取原始轨迹数据。
+3.  **滤波器实例化与配置**：创建六个 `KF1DCA` 实例，并设置其 `dt`、噪声参数和 `window_size`。
+4.  **初始状态设置**：使用第一个测量值初始化所有滤波器的状态。
+5.  **主处理循环**：遍历原始数据，对每个 `KF1DCA` 实例依次调用 `predict()` 和 `update()`。`update()` 方法内部会根据 `window_size` 触发 `smoothOnline()`。
+6.  **剩余平滑**：循环结束后，额外调用 `smoothOnline()` 来处理窗口中剩余的数据。
+7.  **结果输出**：从每个滤波器收集平滑后的状态，并调用 `write_full_state_out` 将结果写入CSV文件。
+
+## 使用方法
+
+1.  **编译**：
+    ```bash
+    cd cpp_kf/build
+    cmake ..
+    make
+    ```
+2.  **运行**：
+    ```bash
+    ./gpfilter_kf
+    ```
+    程序将读取 `../../data/trajectory.csv` 并将平滑结果写入 `../../output/smoothed_trajectory.csv`。
+
+## 参数调整
+
+*   `dt`：采样时间，应与输入数据的采样频率匹配。
+*   `qpos, qvel, qacc`：过程噪声参数。较小的值表示对模型更信任，较大的值表示对模型不信任，更依赖测量。调整这些值可以影响平滑度。
+*   `r`：测量噪声参数。较小的值表示对测量更信任，较大的值表示对测量不信任，更依赖模型预测。
+*   `window_size`：平滑窗口大小。较大的窗口可以提供更平滑的结果，但会引入更大的延迟。较小的窗口延迟小，但平滑效果可能不佳。这是一个在平滑度和延迟之间进行权衡的参数。

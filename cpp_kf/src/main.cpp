@@ -19,19 +19,49 @@ struct KF1DCA {
 
     double Ts {0.01};
 
-    // RTS Smoother storage
-    std::vector<std::vector<double>> x_history;     // filtered states [N][3]
-    std::vector<std::vector<double>> x_pred_history; // predicted states [N][3]
-    std::vector<std::vector<std::vector<double>>> P_history;   // filtered covariances [N][3][3]
-    std::vector<std::vector<std::vector<double>>> P_pred_history; // predicted covariances [N][3][3]
-    std::vector<std::vector<double>> x_smooth;      // smoothed states [N][3]
+    // Online RTS Smoother storage with sliding window
+    std::vector<std::vector<double>> x_history;     // filtered states [window_size][3]
+    std::vector<std::vector<double>> x_pred_history; // predicted states [window_size][3]
+    std::vector<std::vector<std::vector<double>>> P_history;   // filtered covariances [window_size][3][3]
+    std::vector<std::vector<std::vector<double>>> P_pred_history; // predicted covariances [window_size][3][3]
+    std::vector<std::vector<double>> x_smooth;      // smoothed states [window_size][3]
+    std::vector<std::vector<double>> output_buffer; // output buffer for smoothed results
     bool enable_smoothing {true};
+    size_t window_size {10}; // configurable smoothing window size
+    size_t current_index {0}; // current position in the circular buffer
+    size_t data_count {0}; // count of processed data points
 
     void setNoise(double qpos, double qvel, double qacc, double r) {
         Q[0][0] = qpos; Q[1][1] = qvel; Q[2][2] = qacc; R = r;
     }
 
     void setDt(double ts) { Ts = ts; }
+
+    void setWindowSize(size_t size) { 
+        window_size = size; 
+        initializeBuffers();
+    }
+
+    void initializeBuffers() {
+        x_history.resize(window_size);
+        x_pred_history.resize(window_size);
+        P_history.resize(window_size);
+        P_pred_history.resize(window_size);
+        x_smooth.resize(window_size);
+        
+        for (size_t i = 0; i < window_size; ++i) {
+            x_history[i].resize(3);
+            x_pred_history[i].resize(3);
+            x_smooth[i].resize(3);
+            P_history[i].resize(3);
+            P_pred_history[i].resize(3);
+            for (size_t j = 0; j < 3; ++j) {
+                P_history[i][j].resize(3);
+                P_pred_history[i][j].resize(3);
+            }
+        }
+        current_index = 0;
+    }
 
     // Predict step (constant acceleration)
     void predict() {
@@ -69,15 +99,12 @@ struct KF1DCA {
             }
         }
         
-        // Store predicted state and covariance for RTS smoothing
-        if (enable_smoothing) {
-            x_pred_history.push_back(std::vector<double>(3));
-            P_pred_history.push_back(std::vector<std::vector<double>>(3, std::vector<double>(3)));
-            
+        // Store predicted state and covariance for RTS smoothing in circular buffer
+        if (enable_smoothing && !x_pred_history.empty()) {
             for (int i=0;i<3;++i) {
-                x_pred_history.back()[i] = x_pred[i];
+                x_pred_history[current_index][i] = x_pred[i];
                 for (int j=0;j<3;++j) {
-                    P_pred_history.back()[i][j] = APAt[i][j];
+                    P_pred_history[current_index][i][j] = APAt[i][j];
                 }
             }
         }
@@ -116,33 +143,39 @@ struct KF1DCA {
         P[2][1] = -K[2] * P_old[0][1] + P_old[2][1];
         P[2][2] = -K[2] * P_old[0][2] + P_old[2][2];
 
-        // Store filtered state and covariance for RTS smoothing
-        if (enable_smoothing) {
-            x_history.push_back(std::vector<double>(3));
-            P_history.push_back(std::vector<std::vector<double>>(3, std::vector<double>(3)));
-            
+        // Store filtered state and covariance for RTS smoothing in circular buffer
+        if (enable_smoothing && !x_history.empty()) {
             for (int i=0;i<3;++i) {
-                x_history.back()[i] = x[i];
+                x_history[current_index][i] = x[i];
                 for (int j=0;j<3;++j) {
-                    P_history.back()[i][j] = P[i][j];
+                    P_history[current_index][i][j] = P[i][j];
                 }
             }
+            
+            // Perform online smoothing when buffer has enough data
+            data_count++;
+            
+            if (data_count >= window_size) {
+                smoothOnline();
+            }
+            
+            // Move to next position in circular buffer
+            current_index = (current_index + 1) % window_size;
         }
      }
 
-     // RTS Smoother implementation
-     void smooth() {
+     // Online RTS Smoother implementation with sliding window
+     void smoothOnline() {
          if (!enable_smoothing || x_history.empty()) return;
          
-         size_t N = x_history.size();
-         x_smooth.resize(N);
-         for (size_t k = 0; k < N; ++k) {
-             x_smooth[k].resize(3);
-         }
+         size_t N = window_size;
+         
+         // Find the last valid index (most recent data)
+         size_t last_idx = (current_index + window_size - 1) % window_size;
          
          // Initialize with last filtered state
          for (int i=0;i<3;++i) {
-             x_smooth[N-1][i] = x_history[N-1][i];
+             x_smooth[last_idx][i] = x_history[last_idx][i];
          }
          
          const double dt = Ts;
@@ -153,27 +186,30 @@ struct KF1DCA {
              {0,  0,         1}
          };
          
-         // Backward pass
-         for (int k = N-2; k >= 0; --k) {
+         // Backward pass through the circular buffer
+         for (size_t step = 1; step < N; ++step) {
+             size_t k = (last_idx + window_size - step) % window_size;
+             size_t k_next = (k + 1) % window_size;
+             
              // Compute smoother gain: C_k = P_k * A^T * P_pred_{k+1}^{-1}
              double C[3][3] = {0};
              
              // Compute P_pred_{k+1}^{-1}
              double P_pred_inv[3][3];
-             double det = P_pred_history[k+1][0][0] * (P_pred_history[k+1][1][1] * P_pred_history[k+1][2][2] - P_pred_history[k+1][1][2] * P_pred_history[k+1][2][1])
-                        - P_pred_history[k+1][0][1] * (P_pred_history[k+1][1][0] * P_pred_history[k+1][2][2] - P_pred_history[k+1][1][2] * P_pred_history[k+1][2][0])
-                        + P_pred_history[k+1][0][2] * (P_pred_history[k+1][1][0] * P_pred_history[k+1][2][1] - P_pred_history[k+1][1][1] * P_pred_history[k+1][2][0]);
+             double det = P_pred_history[k_next][0][0] * (P_pred_history[k_next][1][1] * P_pred_history[k_next][2][2] - P_pred_history[k_next][1][2] * P_pred_history[k_next][2][1])
+                        - P_pred_history[k_next][0][1] * (P_pred_history[k_next][1][0] * P_pred_history[k_next][2][2] - P_pred_history[k_next][1][2] * P_pred_history[k_next][2][0])
+                        + P_pred_history[k_next][0][2] * (P_pred_history[k_next][1][0] * P_pred_history[k_next][2][1] - P_pred_history[k_next][1][1] * P_pred_history[k_next][2][0]);
              
              if (std::abs(det) > 1e-12) {
-                 P_pred_inv[0][0] = (P_pred_history[k+1][1][1] * P_pred_history[k+1][2][2] - P_pred_history[k+1][1][2] * P_pred_history[k+1][2][1]) / det;
-                 P_pred_inv[0][1] = -(P_pred_history[k+1][0][1] * P_pred_history[k+1][2][2] - P_pred_history[k+1][0][2] * P_pred_history[k+1][2][1]) / det;
-                 P_pred_inv[0][2] = (P_pred_history[k+1][0][1] * P_pred_history[k+1][1][2] - P_pred_history[k+1][0][2] * P_pred_history[k+1][1][1]) / det;
-                 P_pred_inv[1][0] = -(P_pred_history[k+1][1][0] * P_pred_history[k+1][2][2] - P_pred_history[k+1][1][2] * P_pred_history[k+1][2][0]) / det;
-                 P_pred_inv[1][1] = (P_pred_history[k+1][0][0] * P_pred_history[k+1][2][2] - P_pred_history[k+1][0][2] * P_pred_history[k+1][2][0]) / det;
-                 P_pred_inv[1][2] = -(P_pred_history[k+1][0][0] * P_pred_history[k+1][1][2] - P_pred_history[k+1][0][2] * P_pred_history[k+1][1][0]) / det;
-                 P_pred_inv[2][0] = (P_pred_history[k+1][1][0] * P_pred_history[k+1][2][1] - P_pred_history[k+1][1][1] * P_pred_history[k+1][2][0]) / det;
-                 P_pred_inv[2][1] = -(P_pred_history[k+1][0][0] * P_pred_history[k+1][2][1] - P_pred_history[k+1][0][1] * P_pred_history[k+1][2][0]) / det;
-                 P_pred_inv[2][2] = (P_pred_history[k+1][0][0] * P_pred_history[k+1][1][1] - P_pred_history[k+1][0][1] * P_pred_history[k+1][1][0]) / det;
+                 P_pred_inv[0][0] = (P_pred_history[k_next][1][1] * P_pred_history[k_next][2][2] - P_pred_history[k_next][1][2] * P_pred_history[k_next][2][1]) / det;
+                 P_pred_inv[0][1] = -(P_pred_history[k_next][0][1] * P_pred_history[k_next][2][2] - P_pred_history[k_next][0][2] * P_pred_history[k_next][2][1]) / det;
+                 P_pred_inv[0][2] = (P_pred_history[k_next][0][1] * P_pred_history[k_next][1][2] - P_pred_history[k_next][0][2] * P_pred_history[k_next][1][1]) / det;
+                 P_pred_inv[1][0] = -(P_pred_history[k_next][1][0] * P_pred_history[k_next][2][2] - P_pred_history[k_next][1][2] * P_pred_history[k_next][2][0]) / det;
+                 P_pred_inv[1][1] = (P_pred_history[k_next][0][0] * P_pred_history[k_next][2][2] - P_pred_history[k_next][0][2] * P_pred_history[k_next][2][0]) / det;
+                 P_pred_inv[1][2] = -(P_pred_history[k_next][0][0] * P_pred_history[k_next][1][2] - P_pred_history[k_next][0][2] * P_pred_history[k_next][1][0]) / det;
+                 P_pred_inv[2][0] = (P_pred_history[k_next][1][0] * P_pred_history[k_next][2][1] - P_pred_history[k_next][1][1] * P_pred_history[k_next][2][0]) / det;
+                 P_pred_inv[2][1] = -(P_pred_history[k_next][0][0] * P_pred_history[k_next][2][1] - P_pred_history[k_next][0][1] * P_pred_history[k_next][2][0]) / det;
+                 P_pred_inv[2][2] = (P_pred_history[k_next][0][0] * P_pred_history[k_next][1][1] - P_pred_history[k_next][0][1] * P_pred_history[k_next][1][0]) / det;
                  
                  // C_k = P_k * A^T * P_pred_{k+1}^{-1}
                  double PA[3][3] = {0};
@@ -196,7 +232,7 @@ struct KF1DCA {
                  // Smoothed state: x_smooth_k = x_k + C_k * (x_smooth_{k+1} - x_pred_{k+1})
                  double diff[3];
                  for (int i=0;i<3;++i) {
-                     diff[i] = x_smooth[k+1][i] - x_pred_history[k+1][i];
+                     diff[i] = x_smooth[k_next][i] - x_pred_history[k_next][i];
                  }
                  
                  for (int i=0;i<3;++i) {
@@ -212,19 +248,31 @@ struct KF1DCA {
                  }
              }
          }
+         
+         // Store the oldest smoothed result to output buffer
+         size_t oldest_idx = current_index;
+         output_buffer.push_back(std::vector<double>(3));
+         for (int i=0;i<3;++i) {
+             output_buffer.back()[i] = x_smooth[oldest_idx][i];
+         }
      }
 
-     // Get smoothed state at index k
+     // Get smoothed state from output buffer at index k
      void getSmoothedState(size_t k, double state[3]) {
-         if (k < x_smooth.size() && x_smooth[k].size() == 3) {
+         if (k < output_buffer.size() && output_buffer[k].size() == 3) {
              for (int i=0;i<3;++i) {
-                 state[i] = x_smooth[k][i];
+                 state[i] = output_buffer[k][i];
              }
          } else {
              for (int i=0;i<3;++i) {
                  state[i] = x[i];
              }
          }
+     }
+
+     // Get number of available smoothed results
+     size_t getOutputSize() const {
+         return output_buffer.size();
      }
 
      // Clear history for new sequence
@@ -234,6 +282,9 @@ struct KF1DCA {
          P_history.clear();
          P_pred_history.clear();
          x_smooth.clear();
+         output_buffer.clear();
+         current_index = 0;
+         data_count = 0;
      }
 };
 
@@ -288,7 +339,8 @@ int main(int argc, char** argv) {
     // 调整参数以获得更平滑的速度和加速度
     // 减小 qvel 和 qacc，增大 r
     double dt = 1.0/60.0, qpos = 1e-5, qvel = 1e-3, qacc = 1e-2, r = 1e-4; 
-    // if (!parse_args(argc, argv, csv_path, out_path, dt, qpos, qvel, qacc, r)) return 1;
+    size_t window_size = 10; // 可调的平滑窗口大小，n个周期
+    // if (!parse_args(argc, argv, csv_path, out_path, dt, qpos, qvel, qacc, r, window_size)) return 1;
 
     std::vector<Vec6> raw; raw.reserve(10000);
     if (!read_6d_csv(csv_path, raw)) return 2;
@@ -304,6 +356,10 @@ int main(int argc, char** argv) {
     kfrx.setNoise(qpos,qvel,qacc,r);
     kfry.setNoise(qpos,qvel,qacc,r);
     kfrz.setNoise(qpos,qvel,qacc,r);
+    
+    // Set window size for online smoothing
+    kfx.setWindowSize(window_size); kfy.setWindowSize(window_size); kfz.setWindowSize(window_size);
+    kfrx.setWindowSize(window_size); kfry.setWindowSize(window_size); kfrz.setWindowSize(window_size);
 
     // Initialize Kalman filter states with the first measurement
     kfx.x[0] = raw[0].x;
@@ -316,22 +372,31 @@ int main(int argc, char** argv) {
     std::vector<Vec9> pos_state, rpy_state;
     pos_state.reserve(raw.size()); rpy_state.reserve(raw.size());
 
-    // Phase 1: Forward Kalman filtering
+    // Online processing: Kalman filtering with sliding window RTS smoothing
     for (const auto& m : raw) {
         // predict
         kfx.predict(); kfy.predict(); kfz.predict();
         kfrx.predict(); kfry.predict(); kfrz.predict();
-        // update
+        // update (this will trigger online smoothing when window is full)
         kfx.update(m.x); kfy.update(m.y); kfz.update(m.z);
         kfrx.update(m.rx); kfry.update(m.ry); kfrz.update(m.rz);
     }
+    
+    // Process remaining data in the window by forcing smoothing for the remaining samples
+    for (size_t i = 1; i < window_size; ++i) {
+        kfx.smoothOnline(); kfy.smoothOnline(); kfz.smoothOnline();
+        kfrx.smoothOnline(); kfry.smoothOnline(); kfrz.smoothOnline();
+    }
 
-    // Phase 2: RTS Smoothing
-    kfx.smooth(); kfy.smooth(); kfz.smooth();
-    kfrx.smooth(); kfry.smooth(); kfrz.smooth();
-
-    // Phase 3: Collect smoothed states
-    for (size_t i = 0; i < raw.size(); ++i) {
+    // Collect all smoothed states from output buffers
+    size_t max_output_size = kfx.getOutputSize();
+    max_output_size = std::max(max_output_size, kfy.getOutputSize());
+    max_output_size = std::max(max_output_size, kfz.getOutputSize());
+    max_output_size = std::max(max_output_size, kfrx.getOutputSize());
+    max_output_size = std::max(max_output_size, kfry.getOutputSize());
+    max_output_size = std::max(max_output_size, kfrz.getOutputSize());
+    
+    for (size_t i = 0; i < max_output_size; ++i) {
         double temp_state[3];
         
         // Get smoothed states for position (x, y, z)

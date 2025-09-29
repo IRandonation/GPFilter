@@ -9,8 +9,6 @@
 3. 分别对xyz位置和rpy姿态进行对比绘图
 4. 计算积分误差和统计分析
 
-作者：AI Assistant
-日期：2024
 """
 
 import numpy as np
