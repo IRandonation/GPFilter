@@ -156,11 +156,14 @@ struct KF1DCA {
             data_count++;
             
             if (data_count >= window_size) {
+                // 先推进写指针到下一个位置，使当前窗口的最新样本为 (current_index + window_size - 1)
+                current_index = (current_index + 1) % window_size;
+                // 再进行平滑，这样时间索引与输出的“最老样本”一致
                 smoothOnline();
+            } else {
+                // 窗口未满仍需推进写指针
+                current_index = (current_index + 1) % window_size;
             }
-            
-            // Move to next position in circular buffer
-            current_index = (current_index + 1) % window_size;
         }
      }
 
@@ -171,6 +174,7 @@ struct KF1DCA {
          size_t N = window_size;
          
          // Find the last valid index (most recent data)
+         // 最新样本索引为 (current_index + window_size - 1) % window_size
          size_t last_idx = (current_index + window_size - 1) % window_size;
          
          // Initialize with last filtered state
@@ -249,11 +253,22 @@ struct KF1DCA {
              }
          }
          
-         // Store the oldest smoothed result to output buffer
+         // 将窗口中最老的样本推送到输出缓冲：即 current_index（下一次将被覆盖的位置）
          size_t oldest_idx = current_index;
          output_buffer.push_back(std::vector<double>(3));
          for (int i=0;i<3;++i) {
              output_buffer.back()[i] = x_smooth[oldest_idx][i];
+         }
+     }
+
+     // 在序列结束时，冲刷窗口中剩余的N-1个样本到输出缓冲
+     void flushRemaining(size_t n) {
+         if (!enable_smoothing || x_history.empty()) return;
+         if (data_count < window_size) return; // 窗口未满则无需冲刷
+         for (size_t i = 0; i < n; ++i) {
+             smoothOnline();
+             // 前移索引，以便下一次将下一个最老样本推出
+             current_index = (current_index + 1) % window_size;
          }
      }
 
@@ -382,10 +397,11 @@ int main(int argc, char** argv) {
         kfrx.update(m.rx); kfry.update(m.ry); kfrz.update(m.rz);
     }
     
-    // Process remaining data in the window by forcing smoothing for the remaining samples
-    for (size_t i = 1; i < window_size; ++i) {
-        kfx.smoothOnline(); kfy.smoothOnline(); kfz.smoothOnline();
-        kfrx.smoothOnline(); kfry.smoothOnline(); kfrz.smoothOnline();
+    // Flush remaining window to align timestamps; output oldest first
+    if (window_size > 1) {
+        size_t remaining = window_size - 1;
+        kfx.flushRemaining(remaining); kfy.flushRemaining(remaining); kfz.flushRemaining(remaining);
+        kfrx.flushRemaining(remaining); kfry.flushRemaining(remaining); kfrz.flushRemaining(remaining);
     }
 
     // Collect all smoothed states from output buffers
